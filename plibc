@@ -1,0 +1,3098 @@
+#!/usr/local/bin/prisma
+
+//inclua('estrito').modo_global();
+
+local s = [[    
+    modulo: oper
+    autor: "Adalberto Amorim Felipe"
+    versao: "lib_oper-1.0"
+    
+    funcao soma(a,b)[export soma]
+        int a = int(a); //--> cast luaL_checkint(L, 1);
+        int b = int(b); //--> cast luaL_checkint(L,2);
+        int c = int(a) + int(b);
+        retorne int(c); //--> cast lua_pushinteger(L, a+b); retorne 1;
+    fim
+    #include<stdio.h>
+    funcao puts(s)[export puts]
+        const char *s = string(s);
+        int a = int(s);
+        puts(s);
+    fim
+    
+funcao getn()
+    int c = 1;
+    retorne int(c);
+fim
+]]
+
+local identifier = '[a-z_A-Z][a-z_A-Z0-9]*';
+
+local use;
+local teste_args;
+local funcao clear() sis.execute'clear' fim
+se sis.nome:procure'win' entao clear = funcao() sis.execute'cls'; fim fim
+local funcao prompt_sair(txt)
+    imprimaf('%s: ', txt);
+    local op = leia():maiuscula();
+    se op == 'S' ou op == 'SAIR' entao
+        sis.saia(1);
+    fim
+    clear();
+fim
+
+local funcao mkdir(txt)
+    sis.execute('mkdir -p '..txt);
+fim
+se sis.nome:procure'win' entao
+    mkdir = funcao(txt)
+        sis.execute('mkdir ' .. txt);
+    fim
+fim
+
+
+
+local BARRA = sis.nome:procure'win' ? '\\' ou '/'
+
+local global = {
+	userdatas = {}; //para registrar os metamétodos em lua_open: userdatas['retangulo'] = 'meta_reg';
+	mod_funcs = {};
+}
+
+local prisma_headers; // = inclua'headers'; //no final do arquivo
+funcao principal()
+     teste_args();
+     mkdir('lib_src');
+     mkdir('lib_src' .. BARRA .. 'prisma');
+
+     grave_headers(prisma_headers);     
+     
+     local tc_main = compile_lib(args[1]); //file_in = args 1;
+     grave_script_compila(tc_main);
+     imprima'';
+     imprima('Processo terminado: Modulo:', tc_main.modulo);
+     imprima('Verifique em lib_src/');
+fim
+
+
+
+funcao grave_headers(h)
+    T(h);
+    local path = 'lib_src'..BARRA..'prisma'..BARRA;
+    para k, v em pares(h) inicio
+        local a, err = es.abra( path..k, 'escrita');
+        se nao a entao erro(err); fim
+        a:escreva(v);
+        a:feche();        
+    fim
+fim
+
+
+
+
+funcao use(op)
+    imprima[[
+    
+                   Plibc
+----------------------------------------------------
+    Use:
+            plibc filein
+    ou:
+            plibc ajuda
+    Opções:
+            filein: nome do arquivo a ser transpilado.
+            ajuda: mostra  um exemplo  e saída gerada.        
+    
+    Plibc é um utilitário que transforma um código
+    misto entre  Prisma  e  C  em  uma  biblioteca
+    nativa em C pronta para ser compilada com  gcc
+    e ser usada em Prisma!
+----------------------------------------------------
+]]
+
+    se nao op ou op e op:maiuscula() <> 'AJUDA' entao sis.saia(1); fim
+    
+    imprima'Exemplo básico:';
+    local s = [[      
+----------------------------------------------------
+modulo: arit
+autor: "Autor deste modulo"
+versao: "lib-arit-1.0"
+
+funcao soma(a, b)
+    int a = int(a); 
+    int b = int(b); 
+    int c = a + b;
+    retorne int(c); 
+fim 
+
+funcao sub(a, b) [export menos]
+    double a = number(a);
+    double b = number(b);
+    retorne number(a - b);
+fim
+----------------------------------------------------
+]]
+
+    imprima(s);
+
+    prompt_sair('Enter para ver o uso em Prisma ou S para sair');
+
+    local tc = compile_lib(s); 
+
+    s = [[
+
+----------------------------------------------------
+
+Em Prisma:
+ local arit = inclua'arit';
+ imprima( arit.soma(1,2)); //--> 3
+ imprima( arit.menos(4,2)); //--> 2
+ 
+]]
+    imprima(s);
+    prompt_sair('Para ver o resultado gerado ENTER ou S para sair');
+    
+    imprima('\nResultado gerado:') 
+   
+    imprima(tc.txt);
+    sis.saia(1);
+fim
+
+
+local dict_types = {
+ ['nulo']       = 'nil(L)';
+ ['int']        = 'integer(L, %s)';
+ ['integer']    = 'integer(L, %s)';
+ ['inteiro']    = 'integer(L, %s)';
+ ['number']     = 'number(L, %s)';
+ ['numero']     = 'number(L, %s)';
+ ['float']      = 'number(L, %s)';
+ ['double']     = 'number(L, %s)';
+ ['long']       = 'long(L, %s)';
+ ['unsigned']   = 'unsigned(L, %s)';
+ ['uint']       = 'unsigned(L, %s)';
+ ['falso']      = 'boolean(L, 0)';
+ ['verdadeiro'] = 'boolean(L, 1)';
+ ['boolean']    = 'boolean(L, %s)';
+ ['booleano']    = 'boolean(L, %s)';
+ ['bool']       = 'boolean(L, %s)';
+ ['string']     = 'string(L, %s)';
+ ['lstring']    = 'lstring(L, %s, &%s)';
+ ['literal']    = 'literal(L, %s)'; 
+ ['userdata']   = 'value(L, %s)';
+ ['value']      = 'value(L, %s)';
+ ['param']      = 'value(L, %s)';
+ ['tab']        = 'value(L, %s)';
+ ['tabela']     = 'value(L, %s)';
+ ['pointer']    = 'lightuserdata(L, %s)';
+ ['lightuserdata']    = 'lightuserdata(L, %s)';
+ ['char']             = 'lstring(L, &%s, 1)';
+ ['function']         = 'function(L, %s)';
+ 
+}
+
+local id_prefix = '%$%.'; //todo identificador deve ter esse prefixo:  $.int(myint);
+//com exceção dos comandos: funcao, retorne, se, etc.
+
+funcao teste_args()
+    se nao args[1] ou args[1] e args[1]:maiuscula() == 'AJUDA' entao
+        use(args[1]);
+    fim
+fim
+
+local funcao tc_ad(t,v)
+    t[#t+1] = v;
+fim
+local funcao tc_def(t,k,v)
+    t.tdefs[k] = v;
+fim
+local funcao next(tc)
+    tc.i = tc.i + 1;
+    se tc.i > tc.tam_t entao retorne falso; fim
+    tc.cur = tc.t[tc.i];
+    se tc.cur == '\n' entao
+        tc.lin = tc.lin + 1;
+    fim
+    retorne verdadeiro;
+fim
+local funcao cont_lin(tc)
+    tc.lin = tc.lin + 1;
+fim
+local funcao tc_set(tc, txt)
+    tc.txt = tc.txt .. txt;
+fim
+
+local funcao tc_err(tc, txt)
+    imprima('Erro: ' .. txt);
+    imprima('Lin: ' .. tc.lin);
+    imprima('Em: ' .. tc.cur);
+    imprima('    File: ' .. tc.file_in ou '?');
+    sis.saia(1);
+fim
+
+local funcao tc_load(tc, file_in)
+    local a, err = es.abra(file_in, 'leitura');
+    se nao a entao
+        tc:err(err);
+    fim
+    local txt = a:leia('*t');
+    a:feche();
+    retorne txt;  
+fim
+
+local funcao tc_write(tc)
+    local a, err = es.abra(tc.file_out, 'escrita');
+    se nao a entao
+        tc:err(err);
+    fim
+    a:escreva(tc.txt);
+    a:feche();
+fim
+
+local funcao grave_arquivo(f, txt)
+    local a, err = es.abra(f, 'escrita');
+    se nao a entao retorne falso, err; fim
+    a:escreva(txt);
+    a:feche();
+    retorne verdadeiro;
+fim
+
+local funcao tc_open_block(tc)
+    tc.cont_open = tc.cont_open + 1;
+fim
+local funcao tc_close_block(tc);
+    tc.cont_open = tc.cont_open - 1;
+fim
+
+local funcao tc_debug(tc, txt)
+    imprimaf('-------------------\nDebug[%s]:%d: %s. ',  tc.file_in ou '?', tc.lin, txt);
+    //imprimaf('Lin: %d, ', tc.lin);
+    imprimaf('(%s)\n', tc.cur:apare());
+fim
+
+local funcao registre_local(tc, name, type)
+    T(tc); S(name,type);
+    se nao tc.local_vars entao
+        tc:err('Atenção ao declarar uma local fora de uma funcao', 2);
+    fim
+    tc.local_vars[name] = type;
+    tc:debug(string.formate('Registrando: local %s <tipo: %s>', name, type));
+fim
+
+local userdatas_reg = tabela.crie{};//onde os userdatas metametodos serão carregados para registrar 
+local mod_funcs = tabela.crie{}; //onde as funções exportadas serão carregadas na funcao lua_open_modulo.
+funcao compile_lib(file_in)
+    S(file_in);
+
+    local tc = {
+		file_in = file_in;
+		i = 0;
+		prefix = 'p_';
+		txt = '';
+		tdefs={},
+		cur=1;
+		next = next;
+		lin = 1;
+		ad = tc_ad;
+		def = tc_def;
+		cont_lin = cont_lin;
+		set = tc_set;
+		err = tc_err;
+		cont_open = 0; //conta as { abertas e fechadas } abre=+1; feche = -1
+		close_block = tc_close_block;
+		open_block = tc_open_block;
+		load = tc_load;
+		write = tc_write;
+		registre_local = registre_local;
+		retornos = 0;
+		debug = funcao() fim;
+		meta_metodos = {};//cada userdata constroi sua tabela de metamétodos, cada arquivo compilado fica com seu registro de metamétodos, porém uma tabela global é necessária para registrar os registros no modulo main. Fica em global.userdatas;
+    };
+    
+    se args[2] =='-d' ou args[2]=='--debug' entao
+        tc.debug = tc_debug;
+    fim
+    
+    tc.BARRA = '/'
+    se sis.nome:procure'win' entao tc.BARRA = '\\'; fim
+            
+    local s = tc:load(file_in);
+    
+    tc.t = s:analise('\n') ou {s};
+    tc.tam_t = #tc.t;
+    
+    local path, file, ext = sis.nome_arquivo(file_in);
+    path = 'lib_src' .. tc.BARRA .. (path ou '');
+    tc.path = path;
+    tc.file_out = path .. file..'.h';
+    tc.nome_lib = file;
+   
+    enquanto tc:next() inicio
+        se tc.cur:procure('//') entao //comment
+            tc.cur = processe_comment_line(tc);
+        fim
+        
+        se testa_def(tc) entao
+            processe_def(tc);
+            
+        senaose testa_funcao(tc) entao
+            processe_funcao(tc);
+            tc.cont_open = tc.cont_open + 1;
+            
+        senaose testa_checkargs(tc) e nao testa_retornos(tc) entao //processa e gera os luaL_check... obter os args da pilha
+            processe_checkargs(tc);
+            
+        senaose testa_retornos(tc) entao
+            processe_retornos(tc);
+           // imprima('retorno encontrado');
+            //tc.retornos = tc.cont_open;
+            
+        senaose tc.cur:apare()=='fim' entao
+            se tc.retornos == 0 entao
+                tc:set('    return 0;\n');
+            fim
+            tc:set('}');
+            tc.cont_open = tc.cont_open - 1;
+            se tc.cont_open <> 0 entao
+                //tc:err('Faltando fechar bloco com `}\'');
+            fim
+            tc.params = nulo;
+            tc.local_vars = nulo;
+            tc.retornos = 0; //reset value to 0
+            
+        senaose tc.cur:apare():procure('^'..id_prefix..'userdata%s+'..identifier..'%s*{') entao // userdata name -> typedef struct{}name;
+            processe_userdata(tc);   
+        
+        senaose tc.cur:apare():procure('^/%*') entao
+            processe_comentario_longo(tc);
+        senaose tc.cur:procure('=%s*'.. id_prefix .. 'new_userdata%s*%(%s*'..identifier..'%s*%)') entao // Userdata creation
+            processe_new_userdata(tc);
+        
+        senaose tc.cur:procure('%s*'..id_prefix..'new%(%s*('..identifier..')%s*%)') entao
+            //imprima('new() encontrado');
+            processe_new(tc);
+            //leia();
+        
+        //delete_userdata(self);
+        senaose tc.cur:apare():procure('^'..id_prefix..'delete_userdata%s*%(%s*'..identifier..'%s*%)') entao
+            processe_delete_userdata(tc);    
+        
+        senaose tc.cur:apare():procure('^'..id_prefix..'const_') entao//numbers literals  
+            
+            processe_const(tc);
+        senaose testa_is(tc) entao // if ( is_GtkWidget(w) ) {
+             //luaL_testudata (lua_State *L, int arg, const char *tname);
+             processe_is(tc);
+        senaose testa_len(tc) entao //int tam_tab =  #tab; //lua_rawlen (L, int index);
+            processe_len(tc);
+        senaose testa_luafuncs(tc) entao //funcoes api lua: lua_* e luaL_*
+            processe_luafuncs(tc);
+        senaose tc.cur:apare():procure('^'.. id_prefix ..'debug%s*%(') entao
+            processe_debug(tc);
+        
+        // const char tipo_arg1 = $.tipo(arg1);
+        senaose tc.cur:apare():procure(id_prefix .. 'tipo%s*%(') entao
+            processe_tipo(tc);
+        senaose tc.cur:apare():procure(id_prefix .. 'tabela_crie%s*%{%s*%}') entao
+            //$.local tab = $.tabela_crie{}'
+            //$tab[1] = (int) 10;
+            //$.tabela_insira(tab, int, 10);
+            //int n = $.tab[i];
+            processe_tabela(tc);
+            
+        senaose tc.cur:apare():procure('$('..identifier..')%s*%[%s*.-%s*%]%s*=') entao
+            processe_tabela_index(tc);
+            
+         //$tab.nome = (type)value;
+        senaose tc.cur:apare():procure('$('..identifier..')%s*%.%s*('..identifier..')%s*=') entao
+            processe_tabela_field(tc);
+        senao
+            tc.txt = tc.txt .. tc.cur;
+            local _, blocos_abre  = tc.cur:troque('{', '{');
+            local _, blocos_fecha  = tc.cur:troque('}', '}');
+            tc.cont_open = tc.cont_open + blocos_abre;
+            tc.cont_open = tc.cont_open - blocos_fecha;
+        fim
+    fim
+    
+    //tc.meta_metodos[obj_name], {fn_name = tc.prefix .. fn_name, export = export_name})
+    se tc.meta_metodos entao
+        para key, val em pares(tc.meta_metodos) inicio
+            tc:set('\nstatic const luaL_Reg lib_' .. key .. '_funcs[] = {\n');
+            para i, v em ipares(val) inicio //cada tabela meta_metodo possui todos os métodos listados como no comentário acima
+                tc:set('    {"'..v.export..'", '..v.fn_name..'},\n');
+            fim
+            tc:set('    {NULL, NULL}\n};\n\n');
+        fim
+    fim
+    
+    se tc.is_main entao
+       tc.nome_lib = tc.modulo;
+       tc.file_out = tc.path .. tc.modulo .. '.c';
+       //as funções exportadas da lib:
+        se #mod_funcs > 0 entao
+            tc:set('\nstatic const luaL_Reg lib_' .. tc.modulo .. '_funcs[] = {\n');
+            para i, v em ipares(mod_funcs) inicio
+                tc:set('    {"'..v.export..'", ' .. v.fn_name..'},\n');
+            fim
+            tc:set('    {NULL, NULL}\n};\n\n');
+        fim
+        
+        //registrando o modulo:
+        //LUA_API int luaopen_oper (lua_State *L) {
+        tc:set('/*funcao para registrar o modulo*/\n');
+        tc:set('LUA_API int luaopen_'..tc.modulo..'(lua_State *L) {\n');
+        
+         
+        //PRIS_REGISTER_LIB(L, "oper", lib_oper_funcs);
+        tc:set('    PRIS_REGISTER_LIB(L, "'..tc.modulo..'", lib_' .. tc.modulo .. '_funcs);\n');
+        
+        
+        //global.userdatas, {meta_name = w;}
+        //PRIS_REGISTER_META(L, obj_name, meta_funcs) 
+        se global.userdatas entao
+            //PRIS_REGISTER_META(L, "udata_teste2", udata_teste2_metametodos);
+            para key, val em pares(global.userdatas) inicio
+                se val.tem_metodo entao
+                    tc:debug('Registrando userdata: ' .. val.meta_name);
+                    tc:set('    PRIS_REGISTER_META(L, "userdata:'..val.meta_name..'", lib_'..val.meta_name..'_funcs);\n');
+                fim
+            fim
+        fim
+        
+        se tipo(global.const_numbers)== 'tabela' entao
+            para i, v em ipares(global.const_numbers) inicio
+            //{const_name=const_name, export_name = export_name}
+                tc:set('    tab("'..v.export_name..'", number, ' .. v.const_name .. ');\n');
+            fim
+        fim
+        
+        se tipo(global.const_uints)== 'tabela' entao
+            para i, v em ipares(global.const_uints) inicio
+            //{const_name=const_name, export_name = export_name}
+                tc:set('    tab("'..v.export_name..'", unsigned, ' .. v.const_name .. ');\n');
+            fim
+        fim
+        
+        se tipo(global.const_strings)== 'tabela' entao
+            para i, v em ipares(global.const_strings) inicio
+            //{const_name=const_name, export_name = export_name}
+                tc:set('    tab("'..v.export_name..'", literal, ' .. v.const_name .. ');\n');
+            fim
+        fim
+        
+        tc:set('    tab("VERSAO", literal, VERSAO); /*Veja essa macro e outras em prisma.h*/\n');
+        tc:set('    return 1;\n}');
+        tc.txt =  '/* lib ' .. tc.nome_lib .. ' prisma, ' .. sis.data() .. '*/\n'
+            ..'#ifndef _LIB_' .. tc.nome_lib:maiuscula() .. '_\n'
+            .."#define _LIB_" .. tc.nome_lib:maiuscula() .. '_  /*============{*/\n\n'
+            .. '#include <prisma.h>\n'
+            .. '#include <lauxlib.h>\n'
+            .. '#include <prismalib.h>\n'
+            .. 'typedef double number;\n'
+            .. 'typedef const char * string;\n' //   'P' 'G' 'T' 'K' 'U' 'D' '\0';
+            .. 'typedef struct{\n char m[4];\n    int id;\n    unsigned int type;\n    void *u;\n    void *extra;\n}userdata;\n'
+            //.. "#define UDATA_MAGIC 0x54 41 44 55  // 'T' 'A' 'D' 'U' (little endian)"
+            .. "#define UDATA_MAGIC 0x55444154 // 'U' 'D' 'A' 'T'\n"
+            .. "#define USERDATA_INIT(p) if(p!=NULL){p->m[0]='U'; p->m[1]='D'; p->m[2]='A'; p->m[3]='T'; p->id=0;p->type=0;p->u=NULL;p->extra=NULL;}\n"
+            //.. '#define is_udata(ud) (ud!=NULL && strcmp((const char*)ud, "UDATA")==0)\n'
+            .. //'#define is_udata(ud) ((ud)!=NULL && *((int*)(ud)) == UDATA_MAGIC)\n'
+[[
+#define is_udata(ud) is_userdata((ud))
+int is_userdata(userdata *ud){
+	if(! ud ) return 0;
+	
+	const char *m = ud->m;
+	if ( m[0] == 'U' && m[1] == 'D' && m[2] == 'A' && m[3] == 'T' )
+	    return 1;
+	    
+	return 0;
+}
+]]
+            .. [[
+            
+//helper functions:
+//lua.h: LUA_TNIL, LUA_TNUMBER, LUA_TBOOLEAN, LUA_TSTRING, LUA_TTABLE, LUA_TFUNCTION, LUA_TUSERDATA, LUA_TTHREAD, and LUA_TLIGHTUSERDATA.
+const char* get_type(lua_State*L, int index){
+    return lua_typename(L, lua_type (L, index) );
+}
+
+int luaL_checktable(lua_State *L, int index){
+    luaL_checktype (L, index, LUA_TTABLE);
+    return index;
+}
+
+int luaL_checkfunction(lua_State *L, int index){
+    luaL_checktype (L, index, LUA_TFUNCTION);
+    return index;
+}
+
+int luaL_checknil(lua_State *L, int index){
+    luaL_checktype (L, index, LUA_TNIL);
+    return index;
+}
+
+int luaL_checkthread(lua_State *L, int index){
+    luaL_checktype (L, index, LUA_TTHREAD);
+    return index;
+}
+         
+]]
+            .. tc.txt
+            .. '\n#endif /* end _LIB_'..tc.nome_lib:maiuscula() .. '_ }=====================*/\n';
+            
+    senao //não é o módulo main, então é uma lib para include:
+        local nome_atual = tc.file_in:troque('%.', '_'):maiuscula();
+        tc.txt =  '/*Parte da lib ' .. tc.nome_lib .. ' prisma, ' .. sis.data() .. '*/\n'
+            ..'#ifndef _LIB_' .. nome_atual .. '_\n'
+            .."#define _LIB_" .. nome_atual .. '_  /*============{*/\n\n'
+            .. tc.txt
+            .. '\n#endif /* end _LIB_'..nome_atual.. '_ }=====================*/\n';
+        
+    fim //fim se tc.is_main
+    
+    
+    //imprima(tc.txt);
+    tc:write();
+    
+   
+    imprima('->', tc.file_out);
+    retorne tc;
+fim
+
+funcao processe_debug(tc)  //  $.debug("Erro ou mensagem aqui.");
+    local txt = tc.cur:troque('%s*'..id_prefix..'debug%s*%((.*)', 
+    funcao (w)
+        retorne '#ifndef RELEASE\n    printf('..w..'\n#endif\n';
+    fim);
+    tc:set(txt);
+fim
+
+//teste se é um nome válido:
+local funcao is_identifier(txt)
+    se txt:procure('^'..identifier..'$') entao
+        retorne verdadeiro;
+    fim
+    retorne falso;
+fim
+
+
+//esta funcao é usada por diversas funções abaixo:
+local funcao obt_param(tc, c)
+    T(tc); S(c);
+    se tipo(tc.params)<>'tabela' entao
+        tc:err('Este comando só pode ser usado após uma função ser aberta.');
+    fim
+    se tc.params[c] entao
+        retorne tc.params[c];
+    fim
+    local p = '';
+    para k,v em pares(tc.params[c]) inicio
+        p = p .. v .. ', '
+    fim
+    p = p:corte(1, -3);
+    tc:err('O parametro `' .. c ..'` nao foi encontrado na funcao `' .. tc.fn_name .. '('..p..')`');
+fim
+
+
+//retorna o valor da variavel local em tc.local_vars[var] = 'tipovar';
+//ou nulo caso não seja encontrada.
+local funcao obt_local(tc, c) 
+    T(tc); S(c);
+    se tipo(tc.local_vars)<>'tabela' entao
+        tc:err('Este comando só pode ser usado após uma função ser aberta.');
+    fim
+    
+    local tipo_var = tc.local_vars[c];
+    
+    se nao tipo_var entao
+        local p = '';
+        para k,v em pares(tc.local_vars) inicio
+            p = p .. k ..', ';
+        fim 
+        p = p:corte(1, -3);
+        retorne falso, 'Variavel local `' .. c ..'` nao foi encontrado na funcao `' .. tc.fn_name .. '('..p..')`'
+    fim
+    retorne tipo_var;
+fim
+
+
+funcao testa_luafuncs(tc) //funcoes api lua: lua_* e luaL_*
+    retorne tc.cur:procure(id_prefix..'luaL_'..identifier) ou tc.cur:procure('lua_'..identifier);
+fim
+
+funcao processe_luafuncs(tc)
+    local txt = tc.cur:troque(id_prefix..'(lua[L]*_'..identifier..')%s*%([L]*%s*[,]*%s*(.-)([,%)])',
+    funcao(fn, p, final)
+        local L = "L";
+        se p<>"" entao 
+            L = 'L, ';  
+        fim
+        
+        //se nao for numero nem string, é feito o tratamento abaixo:
+        se is_identifier(p)entao
+            //imprima('é identificador');
+           // leia();
+            se convnumero(p[1]) entao
+                tc:err('um nome de parametro nunca deve iniciar por um digito(numero)');
+            fim
+            p = convstring(obt_param(tc, p)); //pode gerar um erro caso o parâmetro não seja encontrado.
+            
+        fim
+        /*
+        imprimaf('fn: %q\n', fn);
+        imprimaf('L: %q\n', L);
+        imprimaf('p: %q\n', p); 
+        // */
+        
+        retorne fn .. '('..L..' '.. p..final;
+    fim);
+    //imprima(txt);
+    tc:set(txt);
+fim
+
+
+funcao processe_comment_line(tc)
+    local i = 1;
+    local tam_cur = #tc.cur;
+    enquanto 1 inicio
+        se tc.cur[i]=='"' entao //line string, se tiver // dentro de uma string ele é pulado
+            i = i + 1; //pula o a abertura "
+            enquanto 1 inicio
+                
+                se tc.cur[i] == '\\' entao i = i + 1; fim //pula os escapes
+                se tc.cur[i] == '"' entao 
+                    i = i + 1; //pula o fechamento "
+                    quebre; 
+                fim //sai da string; 
+                se i >= tam_cur entao 
+                    tc:err('falta fechar string!');
+                fim               
+                i = i + 1;
+            fim
+        senaose tc.cur[i]=='/' e tc.cur[i+1] == '/' entao
+            retorne tc.cur:corte(1, i-1);
+        fim
+        i = i + 1;
+        se i > tam_cur entao quebre; fim
+    fim
+    retorne tc.cur;
+fim
+
+
+
+
+//numbers literals    
+funcao processe_const(tc)
+    local sp, type = tc.cur:separe('(%s*)'.. id_prefix ..'const_('..identifier..')%s*{');
+    se nao type entao tc:err("const_ mal formado."); fim
+    local open_lin = tc.lin;
+    se type == 'number' ou type == 'integer' ou type == 'int' entao
+        global.const_numbers = global.const_numbers ou {};
+        enquanto tc:next() inicio //  RET_0 [export RET_ZERO]
+            se tc.cur:apare() == '}' entao quebre; fim
+            se tc.i >= tc.tam_t entao 
+                tc:err('Fantando fechar const_'..type..'{ aberto na linha: ' .. open_lin); 
+            fim
+             //    CONST_01 [export const01
+            local const_name = tc.cur:apare():separe('^('..identifier..')[%s%[]*');
+            se const_name entao
+                local export, export_name = testa_diretiva_export(tc.cur);
+                se nao export e export_name entao
+                    tc:err(export_name);
+                fim
+                se nao export_name entao 
+                    export_name = const_name;
+                fim
+                tabela.adicione(global.const_numbers, {const_name=const_name, export_name = export_name});
+            fim
+        fim
+    senaose type == 'unsigned' ou type == 'uint' entao
+        global.const_uints = global.const_uints ou {};
+        enquanto tc:next() inicio //  RET_0 [export RET_ZERO]
+            se tc.cur:apare() == '}' entao quebre; fim
+            se tc.i >= tc.tam_t entao 
+                tc:err('Fantando fechar const_'..type..'{ aberto na linha: ' .. open_lin); 
+            fim
+             //    CONST_01 [export const01
+            local const_name = tc.cur:apare():separe('^('..identifier..')[%s%[]*');
+            se const_name entao
+                local export, export_name = testa_diretiva_export(tc.cur);
+                se nao export e export_name entao
+                    tc:err(export_name);
+                fim
+                se nao export_name entao 
+                    export_name = const_name;
+                fim
+                tabela.adicione(global.const_uints, {const_name=const_name, export_name = export_name});
+            fim
+        fim
+    senaose type == 'literal' ou type == 'string' entao 
+        global.const_strings = global.const_strings ou {};
+        enquanto tc:next() inicio //  RET_0 [export RET_ZERO]
+            se tc.cur:apare() == '}' entao quebre; fim
+            se tc.i >= tc.tam_t entao 
+                tc:err('Fantando fechar const_'..type..'{ aberto na linha: ' .. open_lin); 
+            fim
+             //    CONST_01 [export const01
+            local const_name = tc.cur:apare():separe('^('..identifier..')[%s%[]*');
+            se const_name entao
+                local export, export_name = testa_diretiva_export(tc.cur);
+                se nao export e export_name entao
+                    tc:err(export_name);
+                fim
+                se nao export_name entao 
+                    export_name = const_name;
+                fim
+                tabela.adicione(global.const_strings, {const_name=const_name, export_name = export_name});
+            fim
+        fim
+    senao
+        tc:err('tipo const_ não reconhecido. (tipos permitidos: const_uint, const_number, const_string)');
+    fim
+fim
+
+funcao processe_delete_userdata(tc)
+     T(tc); //delete_userdata(self);
+     local txt = tc.cur:troque(id_prefix..'delete_userdata%s*%(%s*('..identifier..')%s*%)'
+     ,funcao (w) // if(self){free(self->u); self-> = NULL;}
+         retorne 'if('..w..'){ if('..w.. '->u){free('..w..'->u);'..w..'->u = NULL;}}';
+     fim)
+     tc:set(txt);
+fim
+
+funcao processe_new(tc)
+    local txt = tc.cur:troque('=(%s*)'..id_prefix..'new%s*%(%s*('..identifier..')%s*%)',
+    funcao (sp, w)
+        retorne sp .. '= malloc(sizeof('..w.. '))';
+    fim);
+    se nao tc.malloc entao
+        tc.txt = '#include <stdlib.h>\n' .. tc.txt;
+        tc.malloc = 1;
+    fim
+    //imprima(txt);
+    tc:set(txt);
+fim
+
+funcao processe_comentario_longo(tc)
+    local open_comment = tc.i;
+    se tc.cur:procure('%*/') entao retorne; fim /*caso o fechamento seja na mesma linha.*/
+    enquanto tc:next() inicio
+        se tc.cur:procure('%*/') entao
+            quebre;
+        fim
+    fim 
+    se tc.i >= tc.tam_t entao
+        tc:err("Falta fechar cometario longo aberto na linha: ".. open_comment); 
+    fim
+fim
+
+funcao processe_new_userdata(tc)
+    local teste;
+    local txt = tc.cur:troque( '(' ..identifier..')%s*=%s*'.. id_prefix .. 'new_userdata%s*%(%s*('..identifier..')%s*%)%s*;',
+    funcao (var, w) // var = new_userdata(w)
+        //imprima'-dentro.......';
+        //leia();
+        //para registrar no lua_open()//precisamos de uma tabela com todos os nomes dos userdatas.
+        //PRIS_REGISTER_META(L, obj_name, meta_funcs) 
+        teste = verdadeiro;
+        //void *new = $.new_userdata(Type); pode ser chamada diversas vezes então...
+        se nao global.userdatas[w] entao //...só adiciona se não foi adicionado ainda.
+            global.userdatas[w] = {meta_name = w;};
+        fim
+        //adiciona ao número de params, (pilha) caso usemos lua_pushvalue(L, num_param);
+        //tc.params:adicione(var);
+        se nao tc.local_vars entao
+            tc:err('Este comando so pode ser usado dentro de uma funcao');
+        fim
+        local reference = 'ref_'..var..'_userdata_'..w;
+        /*se tc.local_vars[var] e tc.cont_open entao
+            tc:err("Variavel local já declarada: "..var);
+        fim*/
+        //tc.local_vars[var] = reference;
+        tc:registre_local(var, reference);
+        local txt_ret = var .. ' = ' .. 'PRIS_CREATE_USERDATA(L, "userdata:' .. w..'", sizeof(userdata));\n'
+                .. '    USERDATA_INIT('..var..');\n'
+                .. '    int '..reference..' = lua_gettop(L);\n';
+        //imprima(txt_ret);
+        //leia();
+        retorne txt_ret;
+    fim);
+    se nao teste entao tc:err('comando new_userdata() mal-formado'); fim
+    tc:set(txt);
+fim
+
+funcao processe_userdata(tc)
+    
+    local sp, name = tc.cur:separe('(%s*)'.. id_prefix ..'userdata%s+(' .. identifier .. ')%s*{');
+    //imprima(sp, name);
+    se nao name entao
+        tc->err('erro userdata mal formado');
+    fim
+    sp = sp ou '';
+    local txt = sp .. 'typedef struct{';
+    
+    local atual_lin = tc.lin;
+    
+    enquanto tc:next() inicio
+        se tc.cur:procure'}' entao
+            txt = txt .. '}'..name..';';
+            quebre;
+        fim
+        se tc.cur:procure('{') entao 
+            tc:err'Erro nao é permitido userdatas aninhados.'; 
+        fim
+        txt = txt .. tc.cur;    
+    fim
+    se tc.i >= tc.tam_t entao 
+        tc:err('userdata nao fechado na linha: ' .. convstring(atual_lin));
+    fim
+    tc:set(txt);
+fim
+
+funcao grave_script_compila(tc)
+ //clibs  nomelib  nome.c
+    se sis.nome:procure'win' entao
+        compila_bat = compila_bat:formate(tc.tdefs.includes ou '', tc.tdefs.clibs ou '', tc.nome_lib, tc.nome_lib);
+        local a, err = grave_arquivo('lib_src'..tc.BARRA..'compila.bat', compila_bat);
+        se nao a entao 
+            tc:err(err);
+        fim
+        sis.execute('cd lib_src'..tc.BARRA..' && compila.bat');
+    senao   //includes, libs, nome_libso, nomelib.c
+        compila_sh = compila_sh:formate(tc.tdefs.includes ou '', tc.tdefs.clibs ou '', tc.nome_lib, tc.nome_lib);
+        local a, err = grave_arquivo('lib_src'..tc.BARRA..'compila.sh', compila_sh);
+        se nao a entao  
+            tc:err(err);
+        fim
+        sis.execute('chmod +x lib_src'..tc.BARRA..'compila.sh && cd lib_src'..tc.BARRA..' && ./compila.sh');
+    fim
+
+fim
+
+
+funcao testa_len(tc) //int tam = $.#var_args;
+//int tam_tab =  $.#tab; //lua_rawlen (L, int index);
+    retorne tc.cur:procure(identifier..'%s*=%s*'.. id_prefix ..'#'..identifier..'%s*;');
+fim
+funcao processe_len(tc)
+    local txt = tc.cur:troque('%s*('..identifier..')%s*=%s*'.. id_prefix ..'#%s*('..identifier..')%s*;',
+    funcao (var, p)
+        retorne ' ' .. var..' = lua_rawlen(L, ' .. obt_param(tc, p) .. ');';    
+    fim)
+    tc:set(txt);
+fim
+
+funcao testa_is(tc)// is_GtkWidget(w)
+    retorne tc.cur:apare():procure('^if%s*%(%s*[!]?'..id_prefix..'is_' ..identifier..'%s*%(.-%)%s*%)');
+fim
+funcao processe_is(tc)
+//luaL_testudata (lua_State *L, int arg, const char *tname);
+//   if (is_GtkWidget(w) )
+    local txt = tc.cur:troque(id_prefix..'is_('..identifier..')%s*%(%s*('..identifier..')%s*%)'
+    ,funcao(tname, arg)
+        //imprima('---->>>>>>>>>>>', tname, arg);
+        //leia();
+        se tname == 'numero' entao tname = 'number';
+        senaose tname == 'booleano' entao tname = 'boolean';
+        senaose tname == 'funcao' ou tname == 'função' entao tname = 'function';
+        senaose tname == 'tabela' entao tname = 'table';
+        fim
+        
+        
+        se tname == 'udata' entao 
+            retorne 'luaL_testudata (L, '.. obt_param(tc, arg) ..', "userdata:' ..tname.. '")'
+        senao
+            retorne 'lua_is' ..tname.. '(L, '.. obt_param(tc, arg) ..  ')'
+        fim
+    fim);
+    tc:set(txt);
+fim
+
+local tlua2c ={
+	number = 'double';
+	integer = 'int';
+	int = 'int';
+	long = 'long';
+	unsigned = 'unsigned int';
+	uint = 'unsigned';
+	['string'] = 'const char*';
+	boolean = 'int';	
+}
+
+funcao testa_retornos(tc) // retorne string(a), int(b), number(c)
+    retorne tc.cur:procure('[%s;]*retorne');
+fim
+
+
+funcao get_retornos(s)
+    local ss = s:separe('retorne%s+(.*)');
+    se nao ss entao retorne falso, 'Comando retorno inválido'; fim
+    //imprima(ss);
+    se ss=='' entao retorne {}; fim
+    local t = ss:analise(',', 1);
+    se nao t entao t = {ss}; fim
+    retorne t;
+fim
+
+//local ret, cont = retornos_to_lua_api(s);
+//esta função processa os retornos, ex. retorne nulo, falso, int(10), string(s);
+
+local funcao retornos_to_lua_api(tc, s)
+    local s = S(s);
+    se s:apare():corte(-1,-1) == ';' entao s = s:apare():corte(1,-2); fim
+    local ret = get_retornos(s);
+    local out = '';
+    para i,v em ipares(ret) inicio
+        //imprima(v);            // $.nulo \n $.int(1)
+        //primeiro tenta $.type(var);
+        local cast = v:separe('%$%.(.-)%s*%(');
+        //se não, depois  tenta $.var
+        se nao cast entao cast = v:separe('%$%.(.*)'); fim
+        se nao cast entao //se ainda não então erro ao tentar retornar var.
+            local txt = '';
+            se nao tc.cur:procure(id_prefix) entao 
+                tc:err'Falta usar o prefixo $. antes do tipo de retorno! Ex. retorne $.int(1)'
+            fim
+            tc:err('Tipo de retorno invalido, espera-se o esquema $.tipo(var)');            
+        fim
+        //imprima(tc.cur, '-->cast:', cast);
+        //leia();
+        local valor_retorno = v:separe('%$%..-%((.-)%)');
+        local param = valor_retorno;
+        
+        se tipo(tc.local_vars)=='tabela' e tc.local_vars[cast] entao //  é uma var local está na tabela de tc.local_vars[var]='tipo';
+            param = cast;
+            cast = tc.local_vars[cast];
+            se cast:apare():corte(1, 4)=='ref_' entao//userdata
+                cast = 'userdata';
+            fim
+        senaose tipo(tc.params)=='tabela' e tc.params[cast] entao // é um parâmetro, ex. somar(a,b); -> a,b
+            param = cast;
+            cast = tc.params[cast]; //retorna o index do parâmetro na stack lua.               
+        senaose cast == 'userdata' entao
+             local ref = tc.local_vars[valor_retorno];
+             //imprima(ref, valor_retorno);
+             //leia();
+             se ref entao
+                 param = ref;
+             fim
+        senaose cast == 'param' ou cast == 'value' ou cast == 'tab' ou cast =='tabela' entao //userdata devemos procurar em obt_param
+            param = obt_local(tc, valor_retorno);
+            
+            se param entao //encontrada a variável.
+                param = valor_retorno;
+            fim
+            se nao param entao 
+                param = obt_param(tc, valor_retorno);                
+            fim
+        senaose convnumero(cast) entao // retorne 1, ...;
+            //--continua
+            param = cast;
+            cast = 'number';   
+        senaose (cast:apare():corte(1)=='"' e cast:apare():corte(-1)=='"') ou (cast:apare():corte(1)=="'" e cast:apare():corte(-1)=="'") entao
+            param = '"'..cast:apare():corte(2,-2)..'"';
+            cast = 'string';
+        fim
+        //imprima(cast, param); 
+        se nao dict_types[cast] entao tc:err('Tipo de retorno não conhecido!'); fim
+        out = out .. '    lua_push' .. string.formate(dict_types[cast], param) .. ';\n';    
+    fim
+    retorne out .. '    return '.. #ret .. ';\n', #ret;
+fim
+
+
+funcao processe_retornos(tc) // int(a), string(b)
+    //imprima('dennnnntro retorrrrnos');
+    local cont = 0;
+    local txt = '';
+    
+    //para tipos retorne nulo; retorne falso; retorne verdadeiro; retorne 1; retorne 2;
+    //     lua_pushnil(L); return 1;
+    //     lua_pushboolean(L, false/true);
+    //     return 1;
+    //     
+    //     etc
+    
+    local txt, cont = retornos_to_lua_api(tc, tc.cur);
+    tc.retornos = cont;
+    tc:set(txt);
+    retorne;
+    
+    /*
+    local name = tc.cur:separe('retorne%s+(.-)+%s*');
+    se n entao
+        txt = txt .. '    return ' .. convstring(n) .. ';' ;
+        tc:set(txt);
+        tc.retornos = n;
+        retorne;
+    fim
+    
+    
+    local s = tc.cur:troque('[%s]*('..identifier..')%s*%(%s*(.-)%s*%)',
+    funcao(cast,param)
+        //imprima('----> ', cast, param);// luaL_push..cast(L, exp|var);\n
+        se tlua2c[cast] entao 
+            se cast == 'int' entao cast = 'integer'; fim
+            txt = txt .. '    '..'lua_push'..cast..'(L, '..param..');\n';
+            cont = cont + 1;
+        senaose cast == 'value' entao
+            cont = cont + 1;
+            txt = txt.. '    lua_pushvalue(L, ' .. obt_param(tc, param)..');\n';
+        senaose cast == 'userdata' ou cast == 'table' entao
+            cont = cont + 1;
+            txt = '';//txt .. '    lua_pushlightuserdata(L, ' ..param..');\n';
+        fim
+        
+    fim);
+    tc.retornos = cont; 
+    txt = txt .. '    return ' .. convstring(cont)..';';
+    tc:set(txt);
+    // */
+fim
+
+funcao testa_checkargs(tc) // int(a) --> luaL_checkint(L, a); // %sluaL,luaL =luaL
+    T(tc);
+    local flag = falso;
+    tc.cur:troque('[%s,=]*'.. id_prefix .. '('..identifier..')%s*%(',
+    funcao(w)                                                        
+        se dict_types[w] ou global.userdatas[w] ou w =='userdata' entao
+            flag = verdadeiro;
+        fim
+    fim);
+    retorne flag;
+fim
+
+local funcao conv(w)
+    retorne tlua2c[w];
+fim
+
+funcao make_local(tc)
+    T(tc);
+    // --> get :    $.local var = $.int a;
+    local txt = tc.cur:troque(id_prefix..'local%s+('..identifier..')%s*=',
+    funcao(var, type)
+    
+    fim);
+fim
+
+funcao processe_checkargs(tc)
+    // imprimaf('TXT: %q\n', tc.cur);
+      //  leia();                 int a =     int                  (num_a);
+    se tc.cur:apare():procure('$return%s+') entao
+        tc:err('Não é possível usar este comando em uma linha após return em C');
+    fim
+                      //local x = $.int(a); ou local t = $.tabela(b);
+    local has_local = tc.cur:procure('local%s+'..identifier..'%s*=');
+    
+    //verificar por locais:
+    local txt = '';
+    se has_local entao //  $.local a = $.int(a); -> int a = luaL_checkinteger(L, a);
+                       //  tc.local_vars['a'] = 'int';
+        make_local(tc);
+    
+    fim
+    
+    local txt = tc.cur:troque('([%s,]*)'..id_prefix..'('..identifier..')%s*%(%s*('..identifier..')%s*%)',
+    funcao(sp, cast, p) // int(a) --> luaL_checkint(L, numparam)
+       // se tlua2c[cast] entao
+       se dict_types[cast] entao
+       
+            local param = obt_param(tc, p);
+            
+            //casts especiais:
+            se cast == 'tab' ou cast == 'tabela' entao
+                retorne sp ..'luaL_checktable(L, '.. param .. ')';
+            senaose cast == 'boolean' ou cast == 'bool' ou cast == 'booleano' entao
+                retorne sp..'lua_toboolean(L, ' .. param .. ')';
+            senaose cast == 'lightuserdata' entao
+                retorne sp .. 'lua_touserdata(L, ' ..param..')';  
+            fim
+            //casts padrão:
+            retorne sp..'luaL_check'.. cast .. '(L, ' .. param .. ')';
+            
+        senaose global.userdatas[cast] entao //cast == 'userdata' entao //retangulo *ret = userdata(ret);
+            //((LStream *)luaL_checkudata(L, 1, LUA_FILEHANDLE))
+            //((userdata*)u)->u;
+            //imprima'ddddddddddddddddddeeeeeeeeeeeeeentro';
+            //leia();
+           retorne sp .. '((userdata*)luaL_checkudata(L, ' .. obt_param(tc,p) 
+                      .. ', "userdata:'..cast..'"))';     
+        fim
+    fim);
+    tc:set(txt);
+fim
+
+funcao testa_diretiva_export(s) //  [export .-]
+        local export_open = s:separe('[#$]%[');
+    local export_close = s:separe('%s*export%s+('..identifier..')%s*%]');
+    se export_open e export_close entao
+        retorne verdadeiro, export_close;
+    fim
+    se export_open e nao export_close entao
+        retorne falso, 'diretiva export mal-formada';
+    fim
+    retorne falso;
+fim
+
+
+
+funcao processe_funcao(tc)
+    local fn_name, params = tc.cur:separe('funcao%s+('..identifier..')%s*%((.-)%)');
+    
+    tc.local_vars = {}; //cada vez que detecta uma função, uma tabela com variáveis locais é criada.
+    
+    //tenta um metamétodo:
+    se nao fn_name entao
+        local obj_name, fn_name, params = tc.cur:separe('funcao%s+('..identifier..')%s*:%s*('..identifier..')%s*%((.-)%)');
+        //imprima('-->', tc.cur);
+        //imprima('local vars', tc.local_vars);
+        //leia();
+        se obj_name entao //retang:area -> retang_area
+            se nao global.userdatas[obj_name] entao
+                tc:err('criando um método para um userdata ainda não existente');
+            fim
+            global.userdatas[obj_name].tem_metodo = verdadeiro;
+            local export, export_name = testa_diretiva_export(tc.cur);
+            se nao export e export_name entao
+                tc:err(export_name);
+            fim
+            se nao export_name entao 
+                export_name = fn_name;
+            fim
+            fn_name = obj_name..'_'..fn_name;
+            //-> retangulo = {meta_metodos_names...}
+            tc.meta_metodos[obj_name] = tc.meta_metodos[obj_name] ou {};//caso já exista a tabela ela é aproveitada, senao é criada uma nova
+            tabela.insira(tc.meta_metodos[obj_name], {fn_name = tc.prefix .. fn_name, export = export_name});
+            
+            
+           local tparams = {};
+           local contador = 1;
+           params:troque('('..identifier..')', funcao(w)
+              //imprima('params:',w);
+              tparams[w:apare()] = contador;
+              contador = contador + 1;
+           fim)
+           
+           tc.fn_name = fn_name;
+           tc.params = tparams; //static int soma(lua_State*L){
+           
+           local txt = 'static int ' .. tc.prefix .. fn_name .. '(lua_State*L){'
+           tc:set(txt);
+           
+           retorne;
+        fim
+        
+    fim
+    
+    se nao fn_name ou nao params entao
+        tc:err('definicao de funcao incorreta');
+    fim
+    
+    // funcao sum(a,b) $[export soma]
+    local export, export_name = testa_diretiva_export(tc.cur);
+    
+    se nao export e export_name entao //diretiva incorreta
+        tc:err(export_name);
+    fim
+    se nao export_name entao //não há diretiva
+        export_name = fn_name;
+       // imprima('=============================> ola', fn_name);
+    fim
+    //se export entao //salvando a funcao exportada para ser colocada na lista regs do módulo
+    mod_funcs:adicione({fn_name = tc.prefix..fn_name, export = export_name});
+    //fim
+    
+   // imprima('------------------------>',export);
+    local tparams = {};
+    local contador = 1;
+    params:troque('('..identifier..')', funcao(w)
+        //imprima('params:',w);
+        tparams[w:apare()] = contador; // --> tparams['arg1'] = 1, ...
+        contador = contador + 1;
+    fim)
+    tc.fn_name = fn_name;
+    tc.params = tparams; //static int soma(lua_State*L){
+    local txt = 'static int ' .. tc.prefix .. fn_name .. '(lua_State*L){'
+    tc:set(txt);
+fim
+
+funcao testa_funcao(tc)
+    //funcao soma(a,b)
+    retorne tc.cur:apare():procure('^funcao%s+'); //..identifier..'%s*%(.-%)');
+fim
+
+local lib_pattern = '[a-zA-Z_][a-zA-Z_0-9%.]*';// letras maiusc. e minusc. underline, numeros e ponto 
+ 
+funcao processe_def(tc)
+    local name, val = tc.cur:apare():separe('^'..id_prefix..'('..identifier..')%s*:(.*)'); 
+    se nao name ou nao val entao
+        tc:err('Definicao incorreta');
+    fim
+    se name == 'inclua' entao  //inclua: lib1.txt lib3.ext lib4.txt
+        val:troque( lib_pattern, 
+        funcao(w)
+            local _, file_include, ext = sis.nome_arquivo(w);
+            tc.importados = tc.importados ou {};
+            se nao tc.importados[file_include] entao //para não incluir um arquivo novamente se já incluído antes.
+                tc.importados[file_include] = verdadeiro;
+                tc:set('#include "'..file_include..'.h"\n');
+                compile_lib(w);//se tiver em outro diretório deve se passar o path completo.
+            fim
+        fim);
+        retorne; //não queremos criar um define das libs importadas.
+    fim
+    
+    se name == 'includes' ou name =='clibs' entao
+        tc:def(name, val);
+        retorne;
+    fim
+    
+    
+    se name:maiuscula() =='MODULO' entao
+        tc.modulo = val:apare();
+        tc.is_main = 1;
+        name = name:maiuscula();
+    fim
+    
+    se name:maiuscula() == 'VERSAO' ou utf8.maiuscula(name) == 'VERSÃO' entao
+        name = 'VERSAO'; 
+    fim
+    
+    local txt = '#define '..name.. " " .. val;
+    tc:def(name, val);
+    tc:set(txt);
+    
+fim
+
+funcao testa_def(tc)
+    retorne tc.cur:apare():procure('^'..id_prefix..identifier..'%s*:');
+fim
+
+funcao processe_tipo(tc) // const char *tipo_arg1 = $.tipo(arg1);
+                         // const char *tipo_arg1 = get_type(L, 1);
+    local s = tc.cur:troque(id_prefix..'tipo%s*%((.-)%)', 
+    funcao(arg)
+        retorne 'get_type(L, ' .. obt_param(tc, arg) .. ')';
+    fim); 
+    tc:set(s);   
+fim
+
+funcao processe_tabela(tc)
+ //$.local tab = $.tabela_crie{}
+    local var = tc.cur:apare():separe('^' .. id_prefix ..'local%s+('..identifier..')%s*=');
+    se nao var entao
+        tc:err("Uma tabela deve ser criada usando o esquema: $.local var = $.tabela_crie{} em vez de " .. tc.cur);
+    fim
+    tc:set('    lua_newtable(L);');
+    tc:set('int ' .. var .. ' = lua_gettop(L);');
+    tc:registre_local(var, 'tabela');
+    //tc.local_vars[var] = 'tabela';       
+fim
+
+funcao processe_tabela_field(tc)
+ //tc.cur:apare():procure('$('..identifier..')%.(.-)=')
+     local var, field, type, value = tc.cur:apare():separe('$('.. identifier..')%s*%.%s*('..identifier..')%s*=%s*%(('..identifier..')%s*%)%s*(.-);');
+     
+     se var entao // $tab["nome"] = (type)val;
+        //lua_pushstring(L, "x");           // chave
+        //lua_pushinteger(L, 10);           // valor
+        //lua_settable(L, -3);
+        local txt = '    lua_pushstring(L, "'..field..'");\n'
+                    ..'    lua_push' .. string.formate(dict_types[type], value) .. ';\n'
+                    ..'    lua_settable(L, '..var..');\n';
+        tc:set(txt);
+     senao
+         tc:err("Campo de tabela invalido!");
+     fim 
+fim
+
+funcao processe_tabela_index(tc)
+    //$tab [1] = (int) 10;  $tab [#tab+1] = (int) 10;
+    local var, idx, type, value = tc.cur:apare():separe('$('.. identifier..')%s*%[%s*(.-)%s*%]%s*=%s*%(('..identifier..')%s*%)%s*(.-);');
+    
+    se nao convnumero(idx) e idx:procure('#'..var..'%s*%+%s*%d+') entao
+        idx = '    luaL_len(L, ' .. var .. ') ' .. idx:separe('#'..var..'%s*(%+%s*%d+)')
+    
+    senaose idx:apare():procure('%(%s*'..identifier..'%s*%)%s*' .. identifier) entao // [(string)name] ou [(int)idx]
+        local idx_type, key = idx:apare():separe('%(%s*('..identifier..')%s*%)%s*(' .. identifier..')');
+        //imprima(idx_type, key);
+        local txt = '    lua_push'.. string.formate(dict_types[idx_type], key) .. ';\n'
+                    ..'    lua_push' .. string.formate(dict_types[type], tc.local_vars[value] ou value) .. ';\n'
+                    ..'    lua_settable(L, '..var..');\n';
+        tc:set(txt);
+        
+        retorne;          
+    senaose idx:apare()=='..' entao
+        idx = '    luaL_len(L, ' .. var .. ') + 1 ';
+        
+    senaose idx:apare():corte(1,1)=='"' e idx:apare():corte(-1,-1)=='"' entao // $tab["nome"] = (type)val;
+        //lua_pushstring(L, "x");           // chave
+        //lua_pushinteger(L, 10);           // valor
+        //lua_settable(L, -3);
+        local txt = '    lua_pushstring(L, '..idx..');\n'
+                    ..'    lua_push' .. string.formate(dict_types[type], value) .. ';\n'
+                    ..'    lua_settable(L, '..var..');\n';
+        tc:set(txt);
+        retorne;                     
+    senaose nao convnumero(idx) entao
+        tc:err('index de tabela inválido!');
+    fim
+  
+    se nao tc.local_vars[var] entao
+       tc.err('Variável local não declarada: ' .. var);
+    senaose tc.local_vars[var] <> 'tabela' entao
+       tc.err('Tentando indexar uma variavel que não é tabela: ' .. var .. ' do tipo: ' .. tc.local_vars[var] );
+    fim
+    //lua_pushinteger(L, 100);
+    local fmt = '    lua_push' .. string.formate(dict_types[type], value) .. ';\n'
+    .. '    lua_rawseti(L, '..var.. ', '.. idx .. ');\n';
+    tc:set(fmt);
+    //imprima(var, idx, type, val);
+fim
+            
+
+//clibs  nomelib  nome.c
+compila_sh = [[
+#!/bin/bash
+
+#script bash para compilar a lib gerada em sistemas linux.
+
+#path includes:
+pincludes=" -I./prisma "  
+includes=" %s "
+#libs para linkar ou outros fontes em C para compilar ou .o para compilar juntos
+clibs=" %s "
+
+#diretorio da bilibotecas Nativas Prisma para instalação, altere de acordo com seu local de instalação.
+prismaclib="/usr/local/lib/prisma/1.0/clib";
+
+nomelib="lib%s1.0.so";
+nomec="%s.c";
+echo "Compilando" $nomelib
+
+gcc -fPIC -shared -g -o $nomelib $nomec  $pincludes $includes $clibs 
+
+chmod +x $nomelib
+
+
+echo "Digite Sua senha para instalar:"
+
+sudo  cp -a  $nomelib  $prismaclib
+
+echo "Compilação terminada, ENTER para sair...";
+
+read gg;
+
+]]
+
+
+
+/* ################# PRISMA HEADERS ##################*/
+prisma_headers = 
+//retorne 
+{
+
+/* ################### prisma.h ##################*/
+["prisma.h"] = [====[
+
+#ifndef __Prisma_H__
+   #define __Prisma_H__    //garante que essa lib só será carregada uma vez
+
+#include "lua.h"  //definições para lib Lua
+#include "lauxlib.h"
+#include <string.h>
+
+/* minhas definições para Prisma:*/
+
+#define NOME_PROG "prisma"
+#define SHOW_VERSION "1.0.107"
+#define SHOW_INFO "Prisma-" SHOW_VERSION "  linguagemprisma@gmail.com (jan/2024)"
+
+
+//facilidade para função de biblioteca C, o ponteiro é *P
+#define PFUNC(f) static int f(lua_State *L){
+#define FIMPFUNC }
+
+//facilidade para o retorno de uma função de biblioteca C
+#define Pfunc static int  
+
+//prisma objeto
+typedef lua_State pObj;
+
+//funções para empurrar itens na pilha
+#define p_pushinteger lua_pushinteger
+#define p_pushunsigned lua_pushunsigned
+#define p_pushnil lua_pushnil
+#define p_pushnumber lua_pushnumber
+#define p_pushstring lua_pushstring
+#define p_pushlstring lua_pushlstring //(L,str,tam);
+#define p_pushfstring lua_pushfstring //(L,fmt,...);
+#define p_pushliteral lua_pushliteral //(L,"string");
+#define p_pushboolean lua_pushboolean
+#define p_pushvalue lua_pushvalue
+#define p_pushpointer lua_pushlightuserdata
+#define p_pushcfunc lua_pushcfunction
+
+
+#define p_pushfalse(L) lua_pushboolean(L,0);
+#define p_pushtrue(L) lua_pushboolean(L,1);
+
+//funções para pegar itens da pilha
+#define p_getinteger luaL_checkinteger //retorna (lua_integer)
+#define p_getint luaL_checkint  //retorna (int)
+#define p_getlong luaL_checklong
+#define p_getunsigned luaL_checkunsigned
+#define p_getnil luaL_checknil
+#define p_getnumber luaL_checknumber
+#define p_getstring luaL_checkstring
+#define p_getlstring luaL_checklstring //(L,index,&tam)
+#define p_getboolean luaL_checkboolean
+#define p_getpointer lua_tolightuserdata
+
+
+//option
+#define p_checkoption luaL_checkoption  // index op = (L, idx,const char*default, const char*str_list_op[]);
+
+//funções para tabela:
+
+#define lua_pushpointer lua_pushlightuserdata
+
+//inserindo valor em campo de tabela:(type = number,string,lightuserdata ou pointer,integer, unsigned,string, value etc.
+//a tabela deve estar no topo
+#define p_setfield(L,type,field,value) lua_push##type(L,value);\
+                                 lua_setfield(L,-2,field);\
+                                 \
+//obtem um campo: tabela deve estar no topo
+#define p_getfield(L,type,field) lua_getfield(L,-1,field);
+
+#define p_pop lua_pop  //elimina n elementos da pilha se 1 entao só o último.
+
+#define p_geti lua_rawgeti //lua_rawgeti (lua_State *L, int index, int n); // t[n]
+
+
+
+#define tab_int(L,field,val) \
+  p_pushinteger(L,val);\
+  lua_setfield(L,-2,field);\
+  \
+
+  
+#define tab_num(L,field,val) \
+  p_pushnumber(L,val);\
+  lua_setfield(L,-2,field);\
+  \
+
+/*Macro para facilitar tabela field ->   tab['field'] = val*/
+/* a tabela deve estar no topo da pilha*/
+#define tab(field, type, val)\
+  lua_push ## type(L,val);\
+  lua_setfield(L,-2,field);\
+  \
+
+/*Macro para facilitar tabela index ->   tab[n] = val*/
+/* a tabela deve estar no topo da pilha */
+#define tabindex(n, type, val)\
+lua_push ## type( L , val);\
+lua_rawseti(L, -2, n);\
+\
+
+    
+  //macro para facilitar criação de bibliotecas em C prisma:
+#define PRIS_START_REG_FUNCS(name_of_array_lib_funcs) static const luaL_Reg name_of_array_lib_funcs[] ={\
+\
+
+
+#define PRIS_END_REG_FUNCS ,{NULL,NULL}\
+};\
+\
+
+#define PRIS_OPEN_MODULO(L, nome_lib) LUA_API int luaopen_ ## nome_lib (lua_State *L) {\
+\
+  
+#define PRIS_CLOSE_MODULO(ret)   return ret;\
+}\
+
+
+
+//Macro para registrar facilmente uma biblioteca prisma em C:
+#define PRIS_REGISTER_LIB(L, lib_name, lib_funcs){ luaL_newlib(L, lib_funcs);\
+    lua_pushvalue(L,-1);\
+    lua_setglobal(L, lib_name);\
+}\
+\
+  
+
+
+
+//Macro para criar um userdata facilmente em prisma C api:
+#define PRIS_CREATE_USERDATA(L,mtname, size) lua_newuserdata(L, size);\
+    luaL_getmetatable(L, mtname);\
+        lua_setmetatable(L, -2);\
+\
+
+
+
+//Registra array de funções com metamétodos de um userdata:
+#define PRIS_REGISTER_META(L, obj_name, meta_funcs) {  luaL_newmetatable(L, obj_name);\
+    lua_pushvalue(L, -1);\
+    lua_setfield(L, -2, "__index"); \
+    luaL_setfuncs(L, meta_funcs, 0);\
+    lua_pop(L, 1);\
+}\
+\
+
+
+
+
+
+#define pris_erro luaL_error
+
+#define PRIS_FUNC(funcname, L) static int funcname(lua_State*L)
+  
+
+/*facilidades para criar bibliotecas prisma*/
+#define PRISMA_FUNC(name) static int name(lua_State*L){
+#define FIM_PRISMA_FUNC(n) return n;}
+
+
+/*exemplo:
+    PRISMA_FUNC(lib_soma);
+        int a = luaL_checknumber(L,1);
+        int b = luaL_checknumber(L,1);
+        lua_pushinteger(L, a+b);
+    FIM_PRISMA_FUNC(1); //1 retorno 
+
+*/
+
+#define PRISMA_REG_FUNCS(name) static luaL_Reg name[] = {
+	#define FN(name, cfunction) {name, cfunction},
+#define FIM_PRISMA_REG_FUNCS {NULL, NULL}};
+
+/*
+    exemplo:
+    PRISMA_REG_FUNCS(teste_funcs)
+        FN("soma", lib_soma})
+        FN("mult", lib_mult)
+    FIM_PRISMA_REG_FUNCS
+*/
+
+#define PRISMA_MODULO(name) LUA_API int luaopen_##name(lua_State *L){
+#define FIM_PRISMA_MODULO(n) return n;}
+
+#define REGISTRE_FUNCS(funcs_array, namespace) luaL_newlib(L, funcs_array);\
+    lua_pushvalue(L, -1);\
+    lua_setglobal(L,namespace);\
+    \
+
+/*
+     exemplo:
+     PRISMA_MODULO(pteste)
+          REGISTRE_FUNCS(teste_funcs, "pteste"); //namespace = pteste ( pteste.soma(1,2) );
+     FIM_PRISMA_MODULO(1) //um retorno;
+*/
+
+
+
+#endif
+
+                         
+                       
+   
+                                 
+
+]====]
+;
+/* ################### lua.h ##################*/
+["lua.h"] = [====[
+/*
+** $Id: lua.h,v 1.285.1.2 2013/11/11 12:09:16 roberto Exp $
+** Lua - A Scripting Language
+** Lua.org, PUC-Rio, Brazil (http://www.lua.org)
+** See Copyright Notice at the end of this file
+*/
+
+
+#ifndef lua_h
+#define lua_h
+
+#include <stdarg.h>
+#include <stddef.h>
+
+
+#include "luaconf.h"
+
+
+#define LUA_VERSION_MAJOR	"1"
+#define LUA_VERSION_MINOR	"0"
+#define LUA_VERSION_NUM		101
+#define LUA_VERSION_RELEASE	"107"
+
+#define LUA_VERSION	LUA_VERSION_MAJOR "." LUA_VERSION_MINOR
+#define LUA_RELEASE	LUA_VERSION "." LUA_VERSION_RELEASE
+#define LUA_COPYRIGHT	LUA_RELEASE
+#define LUA_AUTHORS	"R. Ierusalimschy, L. H. de Figueiredo, W. Celes)"
+
+
+/* mark for precompiled code ('<esc>Pri') */
+#define LUA_SIGNATURE	"\033Pri"
+
+/* option for multiple returns in 'lua_pcall' and 'lua_call' */
+#define LUA_MULTRET	(-1)
+
+
+/*
+** pseudo-indices
+*/
+#define LUA_REGISTRYINDEX	LUAI_FIRSTPSEUDOIDX
+#define lua_upvalueindex(i)	(LUA_REGISTRYINDEX - (i))
+
+
+/* thread status */
+#define LUA_OK		0
+#define LUA_YIELD	1
+#define LUA_ERRRUN	2
+#define LUA_ERRSYNTAX	3
+#define LUA_ERRMEM	4
+#define LUA_ERRGCMM	5
+#define LUA_ERRERR	6
+
+
+typedef struct lua_State lua_State;
+
+typedef int (*lua_CFunction) (lua_State *L);
+
+
+/*
+** functions that read/write blocks when loading/dumping Lua chunks
+*/
+typedef const char * (*lua_Reader) (lua_State *L, void *ud, size_t *sz);
+
+typedef int (*lua_Writer) (lua_State *L, const void* p, size_t sz, void* ud);
+
+
+/*
+** prototype for memory-allocation functions
+*/
+typedef void * (*lua_Alloc) (void *ud, void *ptr, size_t osize, size_t nsize);
+
+
+/*
+** basic types
+*/
+#define LUA_TNONE		(-1)
+
+#define LUA_TNIL		0
+#define LUA_TBOOLEAN		1
+#define LUA_TLIGHTUSERDATA	2
+#define LUA_TNUMBER		3
+#define LUA_TSTRING		4
+#define LUA_TTABLE		5
+#define LUA_TFUNCTION		6
+#define LUA_TUSERDATA		7
+#define LUA_TTHREAD		8
+
+#define LUA_NUMTAGS		9
+
+
+
+/* minimum Lua stack available to a C function */
+#define LUA_MINSTACK	20
+
+
+/* predefined values in the registry */
+#define LUA_RIDX_MAINTHREAD	1
+#define LUA_RIDX_GLOBALS	2
+#define LUA_RIDX_LAST		LUA_RIDX_GLOBALS
+
+
+/* type of numbers in Lua */
+typedef LUA_NUMBER lua_Number;
+
+
+/* type for integer functions */
+typedef LUA_INTEGER lua_Integer;
+
+/* unsigned integer type */
+typedef LUA_UNSIGNED lua_Unsigned;
+
+
+
+/*
+** generic extra include file
+*/
+#if defined(LUA_USER_H)
+#include LUA_USER_H
+#endif
+
+
+/*
+** RCS ident string
+*/
+extern const char lua_ident[];
+
+
+/*
+** state manipulation
+*/
+LUA_API lua_State *(lua_newstate) (lua_Alloc f, void *ud);
+LUA_API void       (lua_close) (lua_State *L);
+LUA_API lua_State *(lua_newthread) (lua_State *L);
+
+LUA_API lua_CFunction (lua_atpanic) (lua_State *L, lua_CFunction panicf);
+
+
+LUA_API const lua_Number *(lua_version) (lua_State *L);
+
+
+/*
+** basic stack manipulation
+*/
+LUA_API int   (lua_absindex) (lua_State *L, int idx);
+LUA_API int   (lua_gettop) (lua_State *L);
+LUA_API void  (lua_settop) (lua_State *L, int idx);
+LUA_API void  (lua_pushvalue) (lua_State *L, int idx);
+LUA_API void  (lua_remove) (lua_State *L, int idx);
+LUA_API void  (lua_insert) (lua_State *L, int idx);
+LUA_API void  (lua_replace) (lua_State *L, int idx);
+LUA_API void  (lua_copy) (lua_State *L, int fromidx, int toidx);
+LUA_API int   (lua_checkstack) (lua_State *L, int sz);
+
+LUA_API void  (lua_xmove) (lua_State *from, lua_State *to, int n);
+
+
+/*
+** access functions (stack -> C)
+*/
+
+LUA_API int             (lua_isnumber) (lua_State *L, int idx);
+LUA_API int             (lua_isstring) (lua_State *L, int idx);
+LUA_API int             (lua_iscfunction) (lua_State *L, int idx);
+LUA_API int             (lua_isuserdata) (lua_State *L, int idx);
+LUA_API int             (lua_type) (lua_State *L, int idx);
+LUA_API const char     *(lua_typename) (lua_State *L, int tp);
+
+LUA_API lua_Number      (lua_tonumberx) (lua_State *L, int idx, int *isnum);
+LUA_API lua_Integer     (lua_tointegerx) (lua_State *L, int idx, int *isnum);
+LUA_API lua_Unsigned    (lua_tounsignedx) (lua_State *L, int idx, int *isnum);
+LUA_API int             (lua_toboolean) (lua_State *L, int idx);
+LUA_API const char     *(lua_tolstring) (lua_State *L, int idx, size_t *len);
+LUA_API size_t          (lua_rawlen) (lua_State *L, int idx);
+LUA_API lua_CFunction   (lua_tocfunction) (lua_State *L, int idx);
+LUA_API void	       *(lua_touserdata) (lua_State *L, int idx);
+LUA_API lua_State      *(lua_tothread) (lua_State *L, int idx);
+LUA_API const void     *(lua_topointer) (lua_State *L, int idx);
+
+
+/*
+** Comparison and arithmetic functions
+*/
+
+#define LUA_OPADD	0	/* ORDER TM */
+#define LUA_OPSUB	1 //1
+#define LUA_OPMUL	2 //2
+#define LUA_OPDIV	3 //3
+#define LUA_OPIDIV  4  /*BETO MODIFICATION*/
+#define LUA_OPBAND  5   //BETO BIT MODIFICATION 2
+#define LUA_OPBOR   6   //BETO BIT MODIFICATION 2
+#define LUA_OPBXOR  7   //BETO BIT MODIFICATION 2
+#define LUA_OPBSHL  8   //BETO BIT MODIFICATION 2
+#define LUA_OPBSHR  9   //BETO BIT MODIFICATION 2
+#define LUA_OPMOD	10 //4
+#define LUA_OPPOW	11 //5
+#define LUA_OPUNM	12 //6
+#define LUA_OPBNOT    13   //BETO BIT MODIFICATION 2
+
+
+LUA_API void  (lua_arith) (lua_State *L, int op);
+
+#define LUA_OPEQ	0
+#define LUA_OPLT	1
+#define LUA_OPLE	2
+
+LUA_API int   (lua_rawequal) (lua_State *L, int idx1, int idx2);
+LUA_API int   (lua_compare) (lua_State *L, int idx1, int idx2, int op);
+
+
+/*
+** push functions (C -> stack)
+*/
+LUA_API void        (lua_pushnil) (lua_State *L);
+LUA_API void        (lua_pushnumber) (lua_State *L, lua_Number n);
+LUA_API void        (lua_pushinteger) (lua_State *L, lua_Integer n);
+LUA_API void        (lua_pushunsigned) (lua_State *L, lua_Unsigned n);
+LUA_API const char *(lua_pushlstring) (lua_State *L, const char *s, size_t l);
+LUA_API const char *(lua_pushstring) (lua_State *L, const char *s);
+LUA_API const char *(lua_pushvfstring) (lua_State *L, const char *fmt,
+                                                      va_list argp);
+LUA_API const char *(lua_pushfstring) (lua_State *L, const char *fmt, ...);
+LUA_API void  (lua_pushcclosure) (lua_State *L, lua_CFunction fn, int n);
+LUA_API void  (lua_pushboolean) (lua_State *L, int b);
+LUA_API void  (lua_pushlightuserdata) (lua_State *L, void *p);
+LUA_API int   (lua_pushthread) (lua_State *L);
+
+
+/*
+** get functions (Lua -> stack)
+*/
+LUA_API void  (lua_getglobal) (lua_State *L, const char *var);
+LUA_API void  (lua_gettable) (lua_State *L, int idx);
+LUA_API void  (lua_getfield) (lua_State *L, int idx, const char *k);
+LUA_API void  (lua_rawget) (lua_State *L, int idx);
+LUA_API void  (lua_rawgeti) (lua_State *L, int idx, int n);
+LUA_API void  (lua_rawgetp) (lua_State *L, int idx, const void *p);
+LUA_API void  (lua_createtable) (lua_State *L, int narr, int nrec);
+LUA_API void *(lua_newuserdata) (lua_State *L, size_t sz);
+LUA_API int   (lua_getmetatable) (lua_State *L, int objindex);
+LUA_API void  (lua_getuservalue) (lua_State *L, int idx);
+
+
+/*
+** set functions (stack -> Lua)
+*/
+LUA_API void  (lua_setglobal) (lua_State *L, const char *var);
+LUA_API void  (lua_settable) (lua_State *L, int idx);
+LUA_API void  (lua_setfield) (lua_State *L, int idx, const char *k);
+LUA_API void  (lua_rawset) (lua_State *L, int idx);
+LUA_API void  (lua_rawseti) (lua_State *L, int idx, int n);
+LUA_API void  (lua_rawsetp) (lua_State *L, int idx, const void *p);
+LUA_API int   (lua_setmetatable) (lua_State *L, int objindex);
+LUA_API void  (lua_setuservalue) (lua_State *L, int idx);
+
+
+/*
+** 'load' and 'call' functions (load and run Lua code)
+*/
+LUA_API void  (lua_callk) (lua_State *L, int nargs, int nresults, int ctx,
+                           lua_CFunction k);
+#define lua_call(L,n,r)		lua_callk(L, (n), (r), 0, NULL)
+
+LUA_API int   (lua_getctx) (lua_State *L, int *ctx);
+
+LUA_API int   (lua_pcallk) (lua_State *L, int nargs, int nresults, int errfunc,
+                            int ctx, lua_CFunction k);
+#define lua_pcall(L,n,r,f)	lua_pcallk(L, (n), (r), (f), 0, NULL)
+
+LUA_API int   (lua_load) (lua_State *L, lua_Reader reader, void *dt,
+                                        const char *chunkname,
+                                        const char *mode);
+
+LUA_API int (lua_dump) (lua_State *L, lua_Writer writer, void *data);
+
+
+/*
+** coroutine functions
+*/
+LUA_API int  (lua_yieldk) (lua_State *L, int nresults, int ctx,
+                           lua_CFunction k);
+#define lua_yield(L,n)		lua_yieldk(L, (n), 0, NULL)
+LUA_API int  (lua_resume) (lua_State *L, lua_State *from, int narg);
+LUA_API int  (lua_status) (lua_State *L);
+
+/*
+** garbage-collection function and options
+*/
+
+#define LUA_GCSTOP		0
+#define LUA_GCRESTART		1
+#define LUA_GCCOLLECT		2
+#define LUA_GCCOUNT		3
+#define LUA_GCCOUNTB		4
+#define LUA_GCSTEP		5
+#define LUA_GCSETPAUSE		6
+#define LUA_GCSETSTEPMUL	7
+#define LUA_GCSETMAJORINC	8
+#define LUA_GCISRUNNING		9
+#define LUA_GCGEN		10
+#define LUA_GCINC		11
+
+LUA_API int (lua_gc) (lua_State *L, int what, int data);
+
+
+/*
+** miscellaneous functions
+*/
+
+LUA_API int   (lua_error) (lua_State *L);
+
+LUA_API int   (lua_next) (lua_State *L, int idx);
+
+LUA_API void  (lua_concat) (lua_State *L, int n);
+LUA_API void  (lua_len)    (lua_State *L, int idx);
+
+LUA_API lua_Alloc (lua_getallocf) (lua_State *L, void **ud);
+LUA_API void      (lua_setallocf) (lua_State *L, lua_Alloc f, void *ud);
+
+
+
+/*
+** ===============================================================
+** some useful macros
+** ===============================================================
+*/
+
+#define lua_tonumber(L,i)	lua_tonumberx(L,i,NULL)
+#define lua_tointeger(L,i)	lua_tointegerx(L,i,NULL)
+#define lua_tounsigned(L,i)	lua_tounsignedx(L,i,NULL)
+
+#define lua_pop(L,n)		lua_settop(L, -(n)-1)
+
+#define lua_newtable(L)		lua_createtable(L, 0, 0)
+
+#define lua_register(L,n,f) (lua_pushcfunction(L, (f)), lua_setglobal(L, (n)))
+
+#define lua_pushcfunction(L,f)	lua_pushcclosure(L, (f), 0)
+
+#define lua_isfunction(L,n)	(lua_type(L, (n)) == LUA_TFUNCTION)
+#define lua_istable(L,n)	(lua_type(L, (n)) == LUA_TTABLE)
+#define lua_islightuserdata(L,n)	(lua_type(L, (n)) == LUA_TLIGHTUSERDATA)
+#define lua_isnil(L,n)		(lua_type(L, (n)) == LUA_TNIL)
+#define lua_isboolean(L,n)	(lua_type(L, (n)) == LUA_TBOOLEAN)
+#define lua_isthread(L,n)	(lua_type(L, (n)) == LUA_TTHREAD)
+#define lua_isnone(L,n)		(lua_type(L, (n)) == LUA_TNONE)
+#define lua_isnoneornil(L, n)	(lua_type(L, (n)) <= 0)
+
+#define lua_pushliteral(L, s)	\
+	lua_pushlstring(L, "" s, (sizeof(s)/sizeof(char))-1)
+
+#define lua_pushglobaltable(L)  \
+	lua_rawgeti(L, LUA_REGISTRYINDEX, LUA_RIDX_GLOBALS)
+
+#define lua_tostring(L,i)	lua_tolstring(L, (i), NULL)
+
+
+
+/*
+** {======================================================================
+** Debug API
+** =======================================================================
+*/
+
+
+/*
+** Event codes
+*/
+#define LUA_HOOKCALL	0
+#define LUA_HOOKRET	1
+#define LUA_HOOKLINE	2
+#define LUA_HOOKCOUNT	3
+#define LUA_HOOKTAILCALL 4
+
+
+/*
+** Event masks
+*/
+#define LUA_MASKCALL	(1 << LUA_HOOKCALL)
+#define LUA_MASKRET	(1 << LUA_HOOKRET)
+#define LUA_MASKLINE	(1 << LUA_HOOKLINE)
+#define LUA_MASKCOUNT	(1 << LUA_HOOKCOUNT)
+
+typedef struct lua_Debug lua_Debug;  /* activation record */
+
+
+/* Functions to be called by the debugger in specific events */
+typedef void (*lua_Hook) (lua_State *L, lua_Debug *ar);
+
+
+LUA_API int (lua_getstack) (lua_State *L, int level, lua_Debug *ar);
+LUA_API int (lua_getinfo) (lua_State *L, const char *what, lua_Debug *ar);
+LUA_API const char *(lua_getlocal) (lua_State *L, const lua_Debug *ar, int n);
+LUA_API const char *(lua_setlocal) (lua_State *L, const lua_Debug *ar, int n);
+LUA_API const char *(lua_getupvalue) (lua_State *L, int funcindex, int n);
+LUA_API const char *(lua_setupvalue) (lua_State *L, int funcindex, int n);
+
+LUA_API void *(lua_upvalueid) (lua_State *L, int fidx, int n);
+LUA_API void  (lua_upvaluejoin) (lua_State *L, int fidx1, int n1,
+                                               int fidx2, int n2);
+
+LUA_API int (lua_sethook) (lua_State *L, lua_Hook func, int mask, int count);
+LUA_API lua_Hook (lua_gethook) (lua_State *L);
+LUA_API int (lua_gethookmask) (lua_State *L);
+LUA_API int (lua_gethookcount) (lua_State *L);
+
+
+struct lua_Debug {
+  int event;
+  const char *name;	/* (n) */
+  const char *namewhat;	/* (n) 'global', 'local', 'field', 'method' */
+  const char *what;	/* (S) 'Lua', 'C', 'main', 'tail' */
+  const char *source;	/* (S) */
+  int currentline;	/* (l) */
+  int linedefined;	/* (S) */
+  int lastlinedefined;	/* (S) */
+  unsigned char nups;	/* (u) number of upvalues */
+  unsigned char nparams;/* (u) number of parameters */
+  char isvararg;        /* (u) */
+  char istailcall;	/* (t) */
+  char short_src[LUA_IDSIZE]; /* (S) */
+  /* private part */
+  struct CallInfo *i_ci;  /* active function */
+};
+
+/* }====================================================================== */
+
+
+/******************************************************************************
+* Copyright (C) 1994-2013 Lua.org, PUC-Rio.
+*
+* Permission is hereby granted, free of charge, to any person obtaining
+* a copy of this software and associated documentation files (the
+* "Software"), to deal in the Software without restriction, including
+* without limitation the rights to use, copy, modify, merge, publish,
+* distribute, sublicense, and/or sell copies of the Software, and to
+* permit persons to whom the Software is furnished to do so, subject to
+* the following conditions:
+*
+* The above copyright notice and this permission notice shall be
+* included in all copies or substantial portions of the Software.
+*
+* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+******************************************************************************/
+
+
+#endif
+
+]====]
+;
+/* ################### prisma_util.h ##################*/
+["prisma_util.h"] = [====[
+
+
+//troca one char por other char se encotrados em orig na string received.
+
+
+void pris_changeChar( const char *orig , char *received , char one, char other , int sizeorig )
+{
+
+	int i;
+	for( i = 0 ; i < sizeorig ; i++ ){
+
+		if( i == sizeorig - 1 ) { received[i] = '\0'; break; }
+		received[i] = orig[i];
+		if( received[i] == one ) received[i] = other;
+
+	} //end for
+
+}
+
+
+int pris_multi_sz_len( const char *mult_sz) //necessario duplo \0\0 no fim da string
+{
+int i = 0;
+int cont = 0;
+
+while(*mult_sz){
+	i += strlen(mult_sz) ;
+	i++;
+	mult_sz += (strlen(mult_sz)+1);
+	cont++;
+	}
+
+return i + 1; //the size of multi_sz; including the \0 char;
+}
+
+//pega multistrngs do tipo "ola\0mundo\0em\0prisma\0\0" e separa os ítens em indices de tabelas prisma
+
+//
+
+void pris_Push_multistr_to_luatable(lua_State*L, char *ptr , int length)
+{
+	lua_pop(L,-1);
+	lua_pop(L,-2);
+	if( length <= 0 ) length = pris_multi_sz_len(ptr);
+
+	//printf("+++ %i\n" , length);
+	char receive[length];
+
+	int i, cont=0 , n_args = 0;
+
+	for(i = 0 ; i < length ; i++ )//primeiramente contamos quantas strings teremos, para criarmos a tabela no tamanho certo:
+     {
+		 if( ptr[i] == '\0') n_args++; //conta o número de \0 finais de strings.
+	 }
+
+	 lua_createtable(L, 0, n_args );
+	 n_args = 1;
+	for(i = 0 ; i < length ; i++ )
+     {
+		 receive[cont] = ptr[i];
+		 if( ptr[i] == '\0'){
+
+			 lua_pushstring(L,receive);  //empurra para pilha
+			 lua_rawseti(L, -2, n_args );//define como indice de uma tabela
+
+			 if(ptr[i+1] == '\0') break; //garantindo que nao leia o último zero
+			  cont = 0; n_args++;
+
+			 }else cont++;
+
+	 }
+
+	  //lua_pushvalue(L, -1); //return the lua table// nao precisa tabela criada já está no topo
+
+	// printf("%i\n\n" , n_args);
+
+}
+
+
+// array of string C to lua table
+
+void pris_strarray_to_table(lua_State*L,char **ext){//push string array into lua table
+	int cont_ext = 0;
+	lua_newtable(L); //cria uma tabela prisma em C
+	while ( ext[cont_ext] ){ //processando cada item da matriz.
+		lua_pushstring(L, ext[cont_ext] ); //pega cada string da matriz de string C
+	    lua_rawseti(L, -2, cont_ext + 1 ); //+1 porque em prisma o indice comeca em 1 nao em 0;
+		cont_ext = cont_ext + 1;
+	}
+	 //freev(ext); //liberando da memoria a matriz//tem que fazer um laco e liberar cada indice, so necessario se a matriz for retorno de malloc() ou calloc() ou realloc();
+}
+
+void pris_table_to_strarray(lua_State*L,int index,char **tab,int len){
+   if(lua_istable(L,index)){
+     int i = 0;
+     for(i=0;i<len;i++){
+       lua_rawgeti (L,index, i+1);
+             
+          tab[i] = (char*) luaL_checkstring(L,-1);
+          lua_pop(L,1);
+          //printf("%s\n",luaL_checkstring(L,-1));
+       }
+     }
+}
+
+
+
+//converter para inteiro lua 5.3
+int prisma_getint(lua_State*L, int index){
+	int ret = luaL_checknumber(L,index);
+	return ret;
+}
+
+]====]
+;
+/* ################### lauxlib.h ##################*/
+["lauxlib.h"] = [====[
+/*
+** $Id: lauxlib.h,v 1.120.1.1 2013/04/12 18:48:47 roberto Exp $
+** Auxiliary functions for building Lua libraries
+** See Copyright Notice in lua.h
+*/
+
+
+#ifndef lauxlib_h
+#define lauxlib_h
+
+
+#include <stddef.h>
+#include <stdio.h>
+
+#include "lua.h"
+
+
+
+/* extra error code for `luaL_load' */
+#define LUA_ERRFILE     (LUA_ERRERR+1)
+
+
+typedef struct luaL_Reg {
+  const char *name;
+  lua_CFunction func;
+} luaL_Reg;
+
+
+LUALIB_API void (luaL_checkversion_) (lua_State *L, lua_Number ver);
+#define luaL_checkversion(L)	luaL_checkversion_(L, LUA_VERSION_NUM)
+
+LUALIB_API int (luaL_getmetafield) (lua_State *L, int obj, const char *e);
+LUALIB_API int (luaL_callmeta) (lua_State *L, int obj, const char *e);
+LUALIB_API const char *(luaL_tolstring) (lua_State *L, int idx, size_t *len);
+LUALIB_API int (luaL_argerror) (lua_State *L, int numarg, const char *extramsg);
+LUALIB_API const char *(luaL_checklstring) (lua_State *L, int numArg,
+                                                          size_t *l);
+LUALIB_API const char *(luaL_optlstring) (lua_State *L, int numArg,
+                                          const char *def, size_t *l);
+LUALIB_API lua_Number (luaL_checknumber) (lua_State *L, int numArg);
+LUALIB_API lua_Number (luaL_optnumber) (lua_State *L, int nArg, lua_Number def);
+
+LUALIB_API lua_Integer (luaL_checkinteger) (lua_State *L, int numArg);
+LUALIB_API lua_Integer (luaL_optinteger) (lua_State *L, int nArg,
+                                          lua_Integer def);
+LUALIB_API lua_Unsigned (luaL_checkunsigned) (lua_State *L, int numArg);
+LUALIB_API lua_Unsigned (luaL_optunsigned) (lua_State *L, int numArg,
+                                            lua_Unsigned def);
+
+LUALIB_API void (luaL_checkstack) (lua_State *L, int sz, const char *msg);
+LUALIB_API void (luaL_checktype) (lua_State *L, int narg, int t);
+LUALIB_API void (luaL_checkany) (lua_State *L, int narg);
+
+LUALIB_API int   (luaL_newmetatable) (lua_State *L, const char *tname);
+LUALIB_API void  (luaL_setmetatable) (lua_State *L, const char *tname);
+LUALIB_API void *(luaL_testudata) (lua_State *L, int ud, const char *tname);
+LUALIB_API void *(luaL_checkudata) (lua_State *L, int ud, const char *tname);
+/*Beto modification - 11/2023*/
+LUALIB_API void * pris_checkuserdata(lua_State *L, int idx, const char *tp);
+
+LUALIB_API void (luaL_where) (lua_State *L, int lvl);
+LUALIB_API int (luaL_error) (lua_State *L, const char *fmt, ...);
+
+LUALIB_API int (luaL_checkoption) (lua_State *L, int narg, const char *def,
+                                   const char *const lst[]);
+
+LUALIB_API int (luaL_fileresult) (lua_State *L, int stat, const char *fname);
+LUALIB_API int (luaL_execresult) (lua_State *L, int stat);
+
+/* pre-defined references */
+#define LUA_NOREF       (-2)
+#define LUA_REFNIL      (-1)
+
+LUALIB_API int (luaL_ref) (lua_State *L, int t);
+LUALIB_API void (luaL_unref) (lua_State *L, int t, int ref);
+
+LUALIB_API int (luaL_loadfilex) (lua_State *L, const char *filename,
+                                               const char *mode);
+
+#define luaL_loadfile(L,f)	luaL_loadfilex(L,f,NULL)
+
+LUALIB_API int (luaL_loadbufferx) (lua_State *L, const char *buff, size_t sz,
+                                   const char *name, const char *mode);
+LUALIB_API int (luaL_loadstring) (lua_State *L, const char *s);
+
+LUALIB_API lua_State *(luaL_newstate) (void);
+
+LUALIB_API int (luaL_len) (lua_State *L, int idx);
+
+LUALIB_API const char *(luaL_gsub) (lua_State *L, const char *s, const char *p,
+                                                  const char *r);
+
+LUALIB_API void (luaL_setfuncs) (lua_State *L, const luaL_Reg *l, int nup);
+
+LUALIB_API int (luaL_getsubtable) (lua_State *L, int idx, const char *fname);
+
+LUALIB_API void (luaL_traceback) (lua_State *L, lua_State *L1,
+                                  const char *msg, int level);
+
+LUALIB_API void (luaL_requiref) (lua_State *L, const char *modname,
+                                 lua_CFunction openf, int glb);
+
+/*
+** ===============================================================
+** some useful macros
+** ===============================================================
+*/
+
+
+#define luaL_newlibtable(L,l)	\
+  lua_createtable(L, 0, sizeof(l)/sizeof((l)[0]) - 1)
+
+#define luaL_newlib(L,l)	(luaL_newlibtable(L,l), luaL_setfuncs(L,l,0))
+
+#define luaL_argcheck(L, cond,numarg,extramsg)	\
+		((void)((cond) || luaL_argerror(L, (numarg), (extramsg))))
+#define luaL_checkstring(L,n)	(luaL_checklstring(L, (n), NULL))
+#define luaL_optstring(L,n,d)	(luaL_optlstring(L, (n), (d), NULL))
+#define luaL_checkint(L,n)	((int)luaL_checkinteger(L, (n)))
+#define luaL_optint(L,n,d)	((int)luaL_optinteger(L, (n), (d)))
+#define luaL_checklong(L,n)	((long)luaL_checkinteger(L, (n)))
+#define luaL_optlong(L,n,d)	((long)luaL_optinteger(L, (n), (d)))
+
+#define luaL_typename(L,i)	lua_typename(L, lua_type(L,(i)))
+
+#define luaL_dofile(L, fn) \
+	(luaL_loadfile(L, fn) || lua_pcall(L, 0, LUA_MULTRET, 0))
+
+#define luaL_dostring(L, s) \
+	(luaL_loadstring(L, s) || lua_pcall(L, 0, LUA_MULTRET, 0))
+
+#define luaL_getmetatable(L,n)	(lua_getfield(L, LUA_REGISTRYINDEX, (n)))
+
+#define luaL_opt(L,f,n,d)	(lua_isnoneornil(L,(n)) ? (d) : f(L,(n)))
+
+#define luaL_loadbuffer(L,s,sz,n)	luaL_loadbufferx(L,s,sz,n,NULL)
+
+
+/*
+** {======================================================
+** Generic Buffer manipulation
+** =======================================================
+*/
+
+typedef struct luaL_Buffer {
+  char *b;  /* buffer address */
+  size_t size;  /* buffer size */
+  size_t n;  /* number of characters in buffer */
+  lua_State *L;
+  char initb[LUAL_BUFFERSIZE];  /* initial buffer */
+} luaL_Buffer;
+
+
+#define luaL_addchar(B,c) \
+  ((void)((B)->n < (B)->size || luaL_prepbuffsize((B), 1)), \
+   ((B)->b[(B)->n++] = (c)))
+
+#define luaL_addsize(B,s)	((B)->n += (s))
+
+LUALIB_API void (luaL_buffinit) (lua_State *L, luaL_Buffer *B);
+LUALIB_API char *(luaL_prepbuffsize) (luaL_Buffer *B, size_t sz);
+LUALIB_API void (luaL_addlstring) (luaL_Buffer *B, const char *s, size_t l);
+LUALIB_API void (luaL_addstring) (luaL_Buffer *B, const char *s);
+LUALIB_API void (luaL_addvalue) (luaL_Buffer *B);
+LUALIB_API void (luaL_pushresult) (luaL_Buffer *B);
+LUALIB_API void (luaL_pushresultsize) (luaL_Buffer *B, size_t sz);
+LUALIB_API char *(luaL_buffinitsize) (lua_State *L, luaL_Buffer *B, size_t sz);
+
+#define luaL_prepbuffer(B)	luaL_prepbuffsize(B, LUAL_BUFFERSIZE)
+
+/* }====================================================== */
+
+
+
+/*
+** {======================================================
+** File handles for IO library
+** =======================================================
+*/
+
+/*
+** A file handle is a userdata with metatable 'LUA_FILEHANDLE' and
+** initial structure 'luaL_Stream' (it may contain other fields
+** after that initial structure).
+*/
+
+#define LUA_FILEHANDLE          "FILE*"
+
+
+typedef struct luaL_Stream {
+  FILE *f;  /* stream (NULL for incompletely created streams) */
+  lua_CFunction closef;  /* to close stream (NULL for closed streams) */
+} luaL_Stream;
+
+/* }====================================================== */
+
+
+
+/* compatibility with old module system */
+#if defined(LUA_COMPAT_MODULE)
+
+LUALIB_API void (luaL_pushmodule) (lua_State *L, const char *modname,
+                                   int sizehint);
+LUALIB_API void (luaL_openlib) (lua_State *L, const char *libname,
+                                const luaL_Reg *l, int nup);
+
+#define luaL_register(L,n,l)	(luaL_openlib(L,(n),(l),0))
+
+#endif
+
+
+#endif
+
+
+
+]====]
+;
+/* ################### luaconf.h ##################*/
+["luaconf.h"] = [====[
+/*
+** $Id: luaconf.h,v 1.176.1.1 2013/04/12 18:48:47 roberto Exp $
+** Configuration file for Lua
+** See Copyright Notice in lua.h
+*/
+
+
+#ifndef lconfig_h
+#define lconfig_h
+
+#include <limits.h>
+#include <stddef.h>
+
+
+/*
+** ==================================================================
+** Search for "@@" to find all configurable definitions.
+** ===================================================================
+*/
+
+
+/*
+@@ LUA_ANSI controls the use of non-ansi features.
+** CHANGE it (define it) if you want Lua to avoid the use of any
+** non-ansi feature or library.
+*/
+#if !defined(LUA_ANSI) && defined(__STRICT_ANSI__)
+#define LUA_ANSI
+#endif
+
+
+#if !defined(LUA_ANSI) && defined(_WIN32) && !defined(_WIN32_WCE)
+#define LUA_WIN		/* enable goodies for regular Windows platforms */
+#endif
+
+#if defined(LUA_WIN)
+#define LUA_DL_DLL
+#define LUA_USE_AFORMAT		/* assume 'printf' handles 'aA' specifiers */
+#endif
+
+
+
+#if defined(LUA_USE_LINUX)
+#define LUA_USE_POSIX
+#define LUA_USE_DLOPEN		/* needs an extra library: -ldl */
+#ifndef _NO_READLINE
+  #define LUA_USE_READLINE	/* needs some extra libraries */
+#endif
+#define LUA_USE_STRTODHEX	/* assume 'strtod' handles hex formats */
+#define LUA_USE_AFORMAT		/* assume 'printf' handles 'aA' specifiers */
+#define LUA_USE_LONGLONG	/* assume support for long long */
+#endif
+
+#if defined(LUA_USE_MACOSX)
+#define LUA_USE_POSIX
+#define LUA_USE_DLOPEN		/* does not need -ldl */
+#ifndef _NO_READLINE
+ #define LUA_USE_READLINE	/* needs an extra library: -lreadline */
+#endif
+#define LUA_USE_STRTODHEX	/* assume 'strtod' handles hex formats */
+#define LUA_USE_AFORMAT		/* assume 'printf' handles 'aA' specifiers */
+#define LUA_USE_LONGLONG	/* assume support for long long */
+#endif
+
+
+
+/*
+@@ LUA_USE_POSIX includes all functionality listed as X/Open System
+@* Interfaces Extension (XSI).
+** CHANGE it (define it) if your system is XSI compatible.
+*/
+#if defined(LUA_USE_POSIX)
+#define LUA_USE_MKSTEMP
+#define LUA_USE_ISATTY
+#define LUA_USE_POPEN
+#define LUA_USE_ULONGJMP
+#define LUA_USE_GMTIME_R
+#endif
+
+
+
+/*
+@@ LUA_PATH_DEFAULT is the default path that Lua uses to look for
+@* Lua libraries.
+@@ LUA_CPATH_DEFAULT is the default path that Lua uses to look for
+@* C libraries.
+** CHANGE them if your machine has a non-conventional directory
+** hierarchy or if you want to install your libraries in
+** non-conventional directories.
+*/
+#if defined(_WIN32)	/* { */
+/*
+** In Windows, any exclamation mark ('!') in the path is replaced by the
+** path of the directory of the executable file of the current process.
+*/
+#define LUA_LDIR	"!\\plibs\\"
+#define LUA_CDIR	"!\\clibs\\"
+#define LUA_PATH_DEFAULT  \
+		 ".\\?_pris.dll;"\
+        LUA_LDIR"?_pris.dll;"\
+        ".\\?.pris;" \
+        LUA_LDIR"?.pris;"  LUA_LDIR"?\\ini.pris;" \
+		LUA_CDIR"?.pris;"  LUA_CDIR"?\\ini.pris;"
+#define LUA_CPATH_DEFAULT \
+        ".\\lib?1.0.dll;"\
+        ".\\?.dll;" \
+		LUA_CDIR"lib?1.0.dll;" LUA_CDIR"ini.dll;"\
+		LUA_CDIR"?.dll;" 
+
+#else			/* }{ */
+
+#define LUA_VDIR	LUA_VERSION_MAJOR "." LUA_VERSION_MINOR "/"
+#define LUA_ROOT	"/usr/local/"
+#define LUA_LDIR	LUA_ROOT "share/prisma/" LUA_VDIR "plib/"
+#define LUA_CDIR	LUA_ROOT "lib/prisma/" LUA_VDIR "clib/"
+
+/*BETO MODIFICATION
+    ex. teste:
+   ./teste_pris.so; /usr/local/prisma/1.0/plib/teste_pris.so
+   ./teste.pris; /usr/local/prisma/1.0/plib/teste.pris
+*/
+
+
+#define LUA_PATH_DEFAULT  \
+        "./?_pris.so;"\
+        LUA_LDIR"?_pris.so;"\
+        "./?.pris;" \
+        LUA_LDIR"?.pris;"  LUA_LDIR"?/ini.pris;" \
+		LUA_CDIR"?.pris;"  LUA_CDIR"?/ini.pris;"
+#define LUA_CPATH_DEFAULT \
+        "./lib?1.0.so;"\
+        "./?.so;"\
+        LUA_CDIR"lib?1.0.so;"\
+        LUA_CDIR"?.so;" LUA_CDIR"ini.so;"
+ 
+#endif			/* } */
+
+
+/*
+@@ LUA_DIRSEP is the directory separator (for submodules).
+** CHANGE it if your machine does not use "/" as the directory separator
+** and is not Windows. (On Windows Lua automatically uses "\".)
+*/
+#if defined(_WIN32)
+#define LUA_DIRSEP	"\\"
+#else
+#define LUA_DIRSEP	"/"
+#endif
+
+
+/*
+@@ LUA_ENV is the name of the variable that holds the current
+@@ environment, used to access global names.
+** CHANGE it if you do not like this name.
+*/
+#define LUA_ENV		"_ENV"
+
+
+/*
+@@ LUA_API is a mark for all core API functions.
+@@ LUALIB_API is a mark for all auxiliary library functions.
+@@ LUAMOD_API is a mark for all standard library opening functions.
+** CHANGE them if you need to define those functions in some special way.
+** For instance, if you want to create one Windows DLL with the core and
+** the libraries, you may want to use the following definition (define
+** LUA_BUILD_AS_DLL to get it).
+*/
+#if defined(LUA_BUILD_AS_DLL)	/* { */
+
+#if defined(LUA_CORE) || defined(LUA_LIB)	/* { */
+#define LUA_API __declspec(dllexport)
+#else						/* }{ */
+#define LUA_API __declspec(dllimport)
+#endif						/* } */
+
+#else				/* }{ */
+
+#define LUA_API		extern
+
+#endif				/* } */
+
+
+/* more often than not the libs go together with the core */
+#define LUALIB_API	LUA_API
+#define LUAMOD_API	LUALIB_API
+
+
+/*
+@@ LUAI_FUNC is a mark for all extern functions that are not to be
+@* exported to outside modules.
+@@ LUAI_DDEF and LUAI_DDEC are marks for all extern (const) variables
+@* that are not to be exported to outside modules (LUAI_DDEF for
+@* definitions and LUAI_DDEC for declarations).
+** CHANGE them if you need to mark them in some special way. Elf/gcc
+** (versions 3.2 and later) mark them as "hidden" to optimize access
+** when Lua is compiled as a shared library. Not all elf targets support
+** this attribute. Unfortunately, gcc does not offer a way to check
+** whether the target offers that support, and those without support
+** give a warning about it. To avoid these warnings, change to the
+** default definition.
+*/
+#if defined(__GNUC__) && ((__GNUC__*100 + __GNUC_MINOR__) >= 302) && \
+    defined(__ELF__)		/* { */
+#define LUAI_FUNC	__attribute__((visibility("hidden"))) extern
+#define LUAI_DDEC	LUAI_FUNC
+#define LUAI_DDEF	/* empty */
+
+#else				/* }{ */
+#define LUAI_FUNC	extern
+#define LUAI_DDEC	extern
+#define LUAI_DDEF	/* empty */
+#endif				/* } */
+
+
+
+/*
+@@ LUA_QL describes how error messages quote program elements.
+** CHANGE it if you want a different appearance.
+*/
+#define LUA_QL(x)	"'" x "'"
+#define LUA_QS		LUA_QL("%s")
+
+
+/*
+@@ LUA_IDSIZE gives the maximum size for the description of the source
+@* of a function in debug information.
+** CHANGE it if you want a different size.
+*/
+#define LUA_IDSIZE	60
+
+
+/*
+@@ luai_writestring/luai_writeline define how 'print' prints its results.
+** They are only used in libraries and the stand-alone program. (The #if
+** avoids including 'stdio.h' everywhere.)
+*/
+#if defined(LUA_LIB) || defined(lua_c)
+#include <stdio.h>
+#define luai_writestring(s,l)	fwrite((s), sizeof(char), (l), stdout)
+#define luai_writeline()	(luai_writestring("\n", 1), fflush(stdout))
+#endif
+
+/*
+@@ luai_writestringerror defines how to print error messages.
+** (A format string with one argument is enough for Lua...)
+*/
+#define luai_writestringerror(s,p) \
+	(fprintf(stderr, (s), (p)), fflush(stderr))
+
+
+/*
+@@ LUAI_MAXSHORTLEN is the maximum length for short strings, that is,
+** strings that are internalized. (Cannot be smaller than reserved words
+** or tags for metamethods, as these strings must be internalized;
+** #("function") = 8, #("__newindex") = 10.)
+*/
+#define LUAI_MAXSHORTLEN        40
+
+
+
+/*
+** {==================================================================
+** Compatibility with previous versions
+** ===================================================================
+*/
+
+/*
+@@ LUA_COMPAT_ALL controls all compatibility options.
+** You can define it to get all options, or change specific options
+** to fit your specific needs.
+*/
+#if defined(LUA_COMPAT_ALL)	/* { */
+
+/*
+@@ LUA_COMPAT_UNPACK controls the presence of global 'unpack'.
+** You can replace it with 'table.unpack'.
+*/
+#define LUA_COMPAT_UNPACK
+
+/*
+@@ LUA_COMPAT_LOADERS controls the presence of table 'package.loaders'.
+** You can replace it with 'package.searchers'.
+*/
+#define LUA_COMPAT_LOADERS
+
+/*
+@@ macro 'lua_cpcall' emulates deprecated function lua_cpcall.
+** You can call your C function directly (with light C functions).
+*/
+#define lua_cpcall(L,f,u)  \
+	(lua_pushcfunction(L, (f)), \
+	 lua_pushlightuserdata(L,(u)), \
+	 lua_pcall(L,1,0,0))
+
+
+/*
+@@ LUA_COMPAT_LOG10 defines the function 'log10' in the math library.
+** You can rewrite 'log10(x)' as 'log(x, 10)'.
+*/
+#define LUA_COMPAT_LOG10
+
+/*
+@@ LUA_COMPAT_LOADSTRING defines the function 'loadstring' in the base
+** library. You can rewrite 'loadstring(s)' as 'load(s)'.
+*/
+#define LUA_COMPAT_LOADSTRING
+
+/*
+@@ LUA_COMPAT_MAXN defines the function 'maxn' in the table library.
+*/
+#define LUA_COMPAT_MAXN
+
+/*
+@@ The following macros supply trivial compatibility for some
+** changes in the API. The macros themselves document how to
+** change your code to avoid using them.
+*/
+#define lua_strlen(L,i)		lua_rawlen(L, (i))
+
+#define lua_objlen(L,i)		lua_rawlen(L, (i))
+
+#define lua_equal(L,idx1,idx2)		lua_compare(L,(idx1),(idx2),LUA_OPEQ)
+#define lua_lessthan(L,idx1,idx2)	lua_compare(L,(idx1),(idx2),LUA_OPLT)
+
+/*
+@@ LUA_COMPAT_MODULE controls compatibility with previous
+** module functions 'module' (Lua) and 'luaL_register' (C).
+*/
+#define LUA_COMPAT_MODULE
+
+#endif				/* } */
+
+/* }================================================================== */
+
+
+
+/*
+@@ LUAI_BITSINT defines the number of bits in an int.
+** CHANGE here if Lua cannot automatically detect the number of bits of
+** your machine. Probably you do not need to change this.
+*/
+/* avoid overflows in comparison */
+#if INT_MAX-20 < 32760		/* { */
+#define LUAI_BITSINT	16
+#elif INT_MAX > 2147483640L	/* }{ */
+/* int has at least 32 bits */
+#define LUAI_BITSINT	32
+#else				/* }{ */
+#error "you must define LUA_BITSINT with number of bits in an integer"
+#endif				/* } */
+
+
+/*
+@@ LUA_INT32 is an signed integer with exactly 32 bits.
+@@ LUAI_UMEM is an unsigned integer big enough to count the total
+@* memory used by Lua.
+@@ LUAI_MEM is a signed integer big enough to count the total memory
+@* used by Lua.
+** CHANGE here if for some weird reason the default definitions are not
+** good enough for your machine. Probably you do not need to change
+** this.
+*/
+#if LUAI_BITSINT >= 32		/* { */
+#define LUA_INT32	int
+#define LUAI_UMEM	size_t
+#define LUAI_MEM	ptrdiff_t
+#else				/* }{ */
+/* 16-bit ints */
+#define LUA_INT32	long
+#define LUAI_UMEM	unsigned long
+#define LUAI_MEM	long
+#endif				/* } */
+
+
+/*
+@@ LUAI_MAXSTACK limits the size of the Lua stack.
+** CHANGE it if you need a different limit. This limit is arbitrary;
+** its only purpose is to stop Lua to consume unlimited stack
+** space (and to reserve some numbers for pseudo-indices).
+*/
+#if LUAI_BITSINT >= 32
+#define LUAI_MAXSTACK		1000000
+#else
+#define LUAI_MAXSTACK		15000
+#endif
+
+/* reserve some space for error handling */
+#define LUAI_FIRSTPSEUDOIDX	(-LUAI_MAXSTACK - 1000)
+
+
+
+
+/*
+@@ LUAL_BUFFERSIZE is the buffer size used by the lauxlib buffer system.
+** CHANGE it if it uses too much C-stack space.
+*/
+#define LUAL_BUFFERSIZE		BUFSIZ
+
+
+
+
+/*
+** {==================================================================
+@@ LUA_NUMBER is the type of numbers in Lua.
+** CHANGE the following definitions only if you want to build Lua
+** with a number type different from double. You may also need to
+** change lua_number2int & lua_number2integer.
+** ===================================================================
+*/
+
+#define LUA_NUMBER_DOUBLE
+#define LUA_NUMBER	double
+
+/*
+@@ LUAI_UACNUMBER is the result of an 'usual argument conversion'
+@* over a number.
+*/
+#define LUAI_UACNUMBER	double
+
+
+/*
+@@ LUA_NUMBER_SCAN is the format for reading numbers.
+@@ LUA_NUMBER_FMT is the format for writing numbers.
+@@ lua_number2str converts a number to a string.
+@@ LUAI_MAXNUMBER2STR is maximum size of previous conversion.
+*/
+#define LUA_NUMBER_SCAN		"%lf"
+#define LUA_NUMBER_FMT		"%.14g"
+#define lua_number2str(s,n)	sprintf((s), LUA_NUMBER_FMT, (n))
+#define LUAI_MAXNUMBER2STR	32 /* 16 digits, sign, point, and \0 */
+
+
+/*
+@@ l_mathop allows the addition of an 'l' or 'f' to all math operations
+*/
+#define l_mathop(x)		(x)
+
+
+/*
+@@ lua_str2number converts a decimal numeric string to a number.
+@@ lua_strx2number converts an hexadecimal numeric string to a number.
+** In C99, 'strtod' does both conversions. C89, however, has no function
+** to convert floating hexadecimal strings to numbers. For these
+** systems, you can leave 'lua_strx2number' undefined and Lua will
+** provide its own implementation.
+*/
+#define lua_str2number(s,p)	strtod((s), (p))
+
+#if defined(LUA_USE_STRTODHEX)
+#define lua_strx2number(s,p)	strtod((s), (p))
+#endif
+
+
+/*
+@@ The luai_num* macros define the primitive operations over numbers.
+*/
+
+/* the following operations need the math library */
+#if defined(lobject_c) || defined(lvm_c)
+#include <math.h>
+#define luai_nummod(L,a,b)	((a) - l_mathop(floor)((a)/(b))*(b))
+#define luai_numpow(L,a,b)	(l_mathop(pow)(a,b))
+#endif
+
+/* these are quite standard operations */
+#if defined(LUA_CORE)
+#define luai_numadd(L,a,b)	((a)+(b))
+
+/* number of bits to consider in a number */
+#if !defined(LUA_NBITS)
+#define LUA_NBITS	32
+#endif
+#define ALLONES		(~(((~(lua_Unsigned)0) << (LUA_NBITS - 1)) << 1)) /*BETO MODIFICATION*/
+/* macro to trim extra bits */
+#define trim(x)		((x) & ALLONES)
+
+#define luai_numband(L,a,b)	(trim((lua_Integer)(a)&(lua_Integer)(b))) /* & (and) beto bit modification*/
+#define luai_numbshl(L,a,b)	(trim((lua_Integer)(a)<<(lua_Integer)(b))) /*  << (left shift) beto bit modification*/
+#define luai_numbshr(L,a,b)	(trim((lua_Integer)(a)>>(lua_Integer)(b))) /*  >> (right shift) beto bit modification*/
+#define luai_numbor(L,a,b)	(trim((lua_Integer)(a)|(lua_Integer)(b))) /*   | (bitwise OR)  beto bit modification*/
+#define luai_numbxor(L,a,b)	(trim((lua_Integer)(a)^(lua_Integer)(b))) /*   ^ (bitwise OR)  beto bit modification*/
+#define luai_numunbnot(L,a)	(~(lua_Integer)(a)) /*   ~ (bitwise OR)  beto bit modification*/
+
+#define luai_numsub(L,a,b)	((a)-(b))
+#define luai_nummul(L,a,b)	((a)*(b))
+#define luai_numdiv(L,a,b)	((a)/(b))
+#define luai_numidiv(L,a,b)	((lua_Integer)(a)/(lua_Integer)(b)) /*BETO MODIFICATION*/
+#define luai_numunm(L,a)	(-(a))
+#define luai_numeq(a,b)		((a)==(b))
+#define luai_numlt(L,a,b)	((a)<(b))
+#define luai_numle(L,a,b)	((a)<=(b))
+#define luai_numisnan(L,a)	(!luai_numeq((a), (a)))
+#endif
+
+
+
+/*
+@@ LUA_INTEGER is the integral type used by lua_pushinteger/lua_tointeger.
+** CHANGE that if ptrdiff_t is not adequate on your machine. (On most
+** machines, ptrdiff_t gives a good choice between int or long.)
+*/
+#define LUA_INTEGER	ptrdiff_t
+
+/*
+@@ LUA_UNSIGNED is the integral type used by lua_pushunsigned/lua_tounsigned.
+** It must have at least 32 bits.
+*/
+#define LUA_UNSIGNED	unsigned LUA_INT32
+
+
+
+/*
+** Some tricks with doubles
+*/
+
+#if defined(LUA_NUMBER_DOUBLE) && !defined(LUA_ANSI)	/* { */
+/*
+** The next definitions activate some tricks to speed up the
+** conversion from doubles to integer types, mainly to LUA_UNSIGNED.
+**
+@@ LUA_MSASMTRICK uses Microsoft assembler to avoid clashes with a
+** DirectX idiosyncrasy.
+**
+@@ LUA_IEEE754TRICK uses a trick that should work on any machine
+** using IEEE754 with a 32-bit integer type.
+**
+@@ LUA_IEEELL extends the trick to LUA_INTEGER; should only be
+** defined when LUA_INTEGER is a 32-bit integer.
+**
+@@ LUA_IEEEENDIAN is the endianness of doubles in your machine
+** (0 for little endian, 1 for big endian); if not defined, Lua will
+** check it dynamically for LUA_IEEE754TRICK (but not for LUA_NANTRICK).
+**
+@@ LUA_NANTRICK controls the use of a trick to pack all types into
+** a single double value, using NaN values to represent non-number
+** values. The trick only works on 32-bit machines (ints and pointers
+** are 32-bit values) with numbers represented as IEEE 754-2008 doubles
+** with conventional endianess (12345678 or 87654321), in CPUs that do
+** not produce signaling NaN values (all NaNs are quiet).
+*/
+
+/* Microsoft compiler on a Pentium (32 bit) ? */
+#if defined(LUA_WIN) && defined(_MSC_VER) && defined(_M_IX86)	/* { */
+
+#define LUA_MSASMTRICK
+#define LUA_IEEEENDIAN		0
+#define LUA_NANTRICK
+
+
+/* pentium 32 bits? */
+#elif defined(__i386__) || defined(__i386) || defined(__X86__) /* }{ */
+
+#define LUA_IEEE754TRICK
+#define LUA_IEEELL
+#define LUA_IEEEENDIAN		0
+#define LUA_NANTRICK
+
+/* pentium 64 bits? */
+#elif defined(__x86_64)						/* }{ */
+
+#define LUA_IEEE754TRICK
+#define LUA_ITRIEEEENDIAN		0
+
+#elif defined(__POWERPC__) || defined(__ppc__)			/* }{ */
+
+#define LUA_IEEE754CK
+#define LUA_IEEEENDIAN		1
+
+#else								/* }{ */
+
+/* assume IEEE754 and a 32-bit integer type */
+#define LUA_IEEE754TRICK
+
+#endif								/* } */
+
+#endif							/* } */
+
+/* }================================================================== */
+
+
+
+
+/* =================================================================== */
+
+/*
+** Local configuration. You can use this space to add your redefinitions
+** without modifying the main part of the file.
+*/
+
+/*
+** Configuração local. Você pode usar este lugar abaixo para adicionar suas redefinições
+** sem mofificar a parte principal deste arquivo.
+*/
+
+/*Prisma config.:*/
+  /*--------------------------  DEFINIÇÃO DE CARACTERES  -----------------------------*/
+  
+   #define _IDENTIF_UNICODE /* prisma aceita variáveis com unicode ex.: usuário = 'Felipe'; 
+                            '-> funcao página(p) imprima_página(p); fim */
+   #define _COMANDOS_UNICODE /* muda as palavras-chave com acento, ex.: entao -> então, funcao -> função etc.*/
+
+   #define _USE_GOTO_COMPUTADO /*em vez da vm usar um switch() case ele usa gotos computados mais veloz*/
+   
+#endif
+
+
+]====]
+;
+/* ################### lualib.h ##################*/
+["lualib.h"] = [====[
+/*
+** $Id: lualib.h,v 1.43.1.1 2013/04/12 18:48:47 roberto Exp $
+** Lua standard libraries
+** See Copyright Notice in lua.h
+*/
+
+
+#ifndef lualib_h
+#define lualib_h
+
+#include "lua.h"
+
+
+
+LUAMOD_API int (luaopen_base) (lua_State *L);
+
+#define LUA_COLIBNAME	"corrotina"
+LUAMOD_API int (luaopen_coroutine) (lua_State *L);
+
+#define LUA_TABLIBNAME	"tabela"
+LUAMOD_API int (luaopen_table) (lua_State *L);
+
+#define LUA_IOLIBNAME	"es"
+LUAMOD_API int (luaopen_io) (lua_State *L);
+
+#define LUA_OSLIBNAME	"sis"
+LUAMOD_API int (luaopen_os) (lua_State *L);
+
+#define LUA_STRLIBNAME	"string"
+LUAMOD_API int (luaopen_string) (lua_State *L);
+
+#define LUA_BITLIBNAME	"bit32"
+LUAMOD_API int (luaopen_bit32) (lua_State *L);
+
+#define LUA_MATHLIBNAME	"mat"
+LUAMOD_API int (luaopen_math) (lua_State *L);
+
+#define LUA_DBLIBNAME	"debug"
+LUAMOD_API int (luaopen_debug) (lua_State *L);
+
+#define LUA_LOADLIBNAME	"pacote"
+LUAMOD_API int (luaopen_package) (lua_State *L);
+
+#define LUA_UTF8LIBNAME	"utf8"
+LUAMOD_API int (luaopen_utf8) (lua_State *L);
+
+
+/* open all previous libraries */
+LUALIB_API void (luaL_openlibs) (lua_State *L);
+
+
+
+#if !defined(lua_assert)
+#define lua_assert(x)	((void)0)
+#endif
+
+
+#endif
+
+]====]
+;
+/* ################### prismalib.h ##################*/
+["prismalib.h"] = [====[
+#include "lualib.h"
+
+]====]
+;
+/* ################### prisma.hpp ##################*/
+["prisma.hpp"] = [====[
+// lua.hpp
+// Lua header files for C++
+// <<extern "C">> not supplied automatically because Lua also compiles as C++
+
+extern "C" {
+#include "lua.h"
+#include "lualib.h"
+#include "lauxlib.h"
+}
+
+]====]
+;
+} /* ################ FIM PRISMA HEADERS ################*/
+
+
+
+
+

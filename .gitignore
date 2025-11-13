@@ -1,0 +1,15 @@
+# Ignora a pasta de build inteira gerada pelo plibc
+/lib_src/
+
+# Ignora todos os arquivos compilados (binarios)
+*.so
+*.o
+*.dll
+
+# Ignora a documentacao gerada (mantem os templates)
+doc
+
+# Arquivos de Sistema/Editor
+.DS_Store
+*~
+Thumbs.db

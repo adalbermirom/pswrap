@@ -1,0 +1,2061 @@
+#!/usr/local/bin/prisma
+
+local funcao teste_versao(n_versao)
+    local Major, Minor, Release = string.separe(_VERSAO,'(%d+)%.(%d+)%.(%d+)');
+    local Major, Minor, Release = convnumero(Major), convnumero(Minor),convnumero(Release);
+    se Release < n_versao entao
+        imprima("\n\tEste programa requer Prisma 1.0." .. convstring(n_versao) .. " ou superior");
+        imprima("\tSua versão atual: Prisma " .. _VERSAO);
+        sis.saia(1);
+    fim
+fim
+
+teste_versao(107);
+
+
+//fazendo o programa ficar mais eficiente com variáveis locais.
+local escreva_footer, escreva_menu_funcoes, escreva_top, escreva_header, html_escape, html_escape_dec, procure_tag, mk_logo, mk_fonte, mk_autor, mk_veja, mk_header_tag, insira_linhas, verifique_header, mk_html_tag, processe_funcao, processe_var, processe, processe_fonte, crie_id, obt_atual_id, obt_nome_var, obt_nome_funcao, analise, grave_arquivo, leia_arquivo;
+
+local string = string; 
+local es = es;
+local tabela = tabela;
+
+local estrito = inclua'estrito';
+local hl = inclua'colorize';
+
+
+local funcao mostre_info()
+    imprima '\t:::::::::::::::::::::::::::::::::::::::::::'
+    imprima('\t: Minidoc-0.1 linguagem Prisma - nov/2023 :');
+    imprima('\t:.........................................:');
+fim
+
+local funcao use()
+    mostre_info();
+    imprima('\n\tUse: ' .. args[0] .. ' entrada.prisma\n');
+    imprima('\n Cuidado! Se houver uma pasta doc/ ela será mesclada com os novos documentos!');
+fim
+
+local dir = inclua'dir';
+
+estrito.modo_global();//nesse modo as variáveis globais não podem mudar de tipo. E variáveis não declaradas causam erro.
+
+local _id_cont=0;
+funcao crie_id()
+    _id_cont = _id_cont + 1;
+    retorne 'id_' .. string.formate('%06X', _id_cont);
+fim
+
+local _id_menu_principal = crie_id(); //id do menu principal
+
+funcao principal(args)
+
+    se nao args[1] entao //caso não haja argumento, imprima a mensagem de ajuda e saia.
+        use();
+        sis.saia(1);
+    fim
+    
+    //pasta doc é onde o manual html gerado será salvo.
+    se nao dir.dir_existe('doc') entao //verifica se a pasta doc existe, se não existir ela é criada.
+        local ret, err = dir.criedir('doc');
+        se nao ret entao erro(err); fim
+    fim
+    
+    local file = args[1]; //o primeiro e único arg é o nome do arquivo de entrada a ser processado.
+    local p, a, ex = sis.nome_arquivo(file);
+    p = p ou '';
+    local pasta = args[2] ou 'doc/';
+    se pasta:corte(-1,-1) <> '/' entao pasta = pasta..'/'; fim
+    local file_out = p..pasta..a..'.html'; //para o nome de saída apenas acrescento a extensão html.
+
+    local txt = leia_arquivo(file); //lendo o arquivo para a var txt;
+    //imprima(txt);
+    
+    local tab, err = processe_fonte(txt); //função central que ira procurar por documentação
+                                          //em caso de erro, é retornado falos + msg de erro.
+                                          
+    
+    
+    se nao tab entao //caso seja retornado falso é feito o tratamento de erro e o programa é encerrado.
+        es.erro:escreva('Arquivo: ' .. file .. ' --> ' .. err .. '\n\n');
+        sis.saia(1);
+    fim
+    
+    link_nomes(tab);
+         
+    local a,err = es.abra(file_out, 'eb'); //tudo deu certo então vamos abrir o arq. de saída para gravar o resultado.
+    se nao a entao erro(err); fim //em caso de erro é finalizado...
+    escreva_top(a, tab);  //escrevemos o topo do html (header);
+    crie_menu_flutuante(a,tab); //criamos um menu flutuante apos abertura do body.
+    escreva_header(a, tab);  //escrevemos o header(cabeçalho) da documentação.
+    escreva_funcoes(a, tab); //escrevemos o menu links com a lista de funções documentadas. 
+    escreva_vars(a, tab);  // o mesmo com as variáveis se houver...
+    escreva_sections(a, tab);//escreve as seções se houver...
+    escreva_footer(a,tab); // escrevemos o footer(rodapé) do html 
+    a:escreva(html_end); // finalizamos, fechamento de tags body e html.
+    a:feche();
+    
+    grave_arquivo('doc/tema_padrao.css', html_padrao_css);  //grava o arquivo css
+    grave_arquivo('doc/tema_dark.css', html_dark_css);
+    grave_arquivo('doc/light_simple.css', html_light_css);
+    grave_arquivo('doc/index.js', html_index_js); //grava o arquivo js
+    grave_arquivo('doc/temas_itens.json', temas_json);
+    grave_arquivo('doc/prisma.png', prisma_logo:dec_base64()); // grava a imagem prisma que está no fim deste programa em base 64.
+    mostre_info(); //por fim mostra a informação do programa minidoc
+    poe'\tProcesso terminado! Veja a pasta doc/'; //e imprime a frase final!
+    retorne 0;
+fim
+
+função string_links(tlink)
+    local s = '';
+    para k, v em ipares(tlink) início
+        s = s .. tlink[v] .. '\n';
+    fim
+    retorne s;
+fim
+
+função procure_link_troque(t, s)
+    T(t); S(s);
+    local ts = s:analise('\n', 1);
+    
+    local tlen = #t;
+    para i=1, tlen início
+        //imprima(t[i]);
+        t[i] = t[i]:troque('[%w_]+', funcao(word)
+            se #word < 2 então retorne word; fim
+            local proc_link, tmp;
+            para i,v em ipares(ts) início
+                v:separe('<a.*>(.*)</a>'):troque('[%w_]+', funcao(vw) 
+                    se word == vw então
+                        proc_link = vw;
+                    fim
+                fim);
+                //<a href="#id_000002">}Array; //</a>
+                se proc_link então tmp = v; quebre; fim //busca encontrada então quebramos.
+            fim
+            local compare = '<h2 class="subtitulo-doc">';
+            se proc_link e t[i]:corte(1, #compare) <> compare então 
+                //retorne (tmp:corte( 1, 21) .. word ..'</a>');
+                //imprima(t[i]);
+            fim
+        fim) //fim t[i]:troque(...)
+    fim
+   // imprima(s);
+fim
+
+//procurar ${} em: tab[idx], tab.vars[idx], tab.section[idx]
+// se houver um link correspondente em: tab.funcs[idx], tab.vars.menu[idx],
+//tab.section.menu[idx]
+função link_nomes(tab)
+    local s = string_links(tab.funcs) ..
+              string_links(tab.vars.menu) ..
+              string_links(tab.section.menu);
+              
+    procure_link_troque(tab, s);
+    procure_link_troque(tab.vars, s);
+    procure_link_troque(tab.section, s);
+
+fim
+
+local funcao crie_select(label, id, events, tab_itens)
+    S(label,id,events);
+    T(tab_itens);
+/*  <label for="cars">Choose a car:</label>
+  <select name="cars" id="cars">
+    <option value="volvo">Volvo</option>
+    <option value="saab">Saab</option>
+    <option value="opel">Opel</option>
+    <option value="audi">Audi</option>
+  </select>
+*/
+    local id = id; //id para combo box muda tema.
+    local s = '\n<label class="titulo" for="'..id..'">' .. label .. '</label>\n';
+    s = s .. '<select class="titulo" name="' .. id .. '" id="' ..id .. '" ' .. events .. ' >\n';
+    para i, v em ipares(tab_itens) inicio
+        s = s .. '<option value="'.. v.val .. '">'..v.txt..'</option>\n';
+    fim
+    s = s .. '</select>\n';
+    retorne s, id;
+fim
+
+
+//cria um menu flutuante do lado direito superior da tela.
+funcao crie_menu_flutuante(a,tab)
+   V('arquivo',a); T(tab);
+/*
+  <nav class="floating-menu">
+    <button onclick="open_menu(this, 'menu_funcoes')">&#x2630 Menu</button>
+    <span>Funções</span>
+    <div id="menu_funcoes" hidden>    
+    <h2>Floating Menu</h2>
+    <a href="/css/">CSS</a>
+    <a href="/html/">HTML</a>
+    <a href="/coldfusion/">ColdFusion</a>
+    <a href="/database/">Database</a>
+    </div>
+    </nav>
+*/
+
+  se nao tab.funcs[1] e nao tab.vars.menu[1] e nao tab.section.menu[1] entao retorne; fim
+  
+  local id_nav_menu_flutuante = crie_id();
+  local id_div_menu_flutuante = crie_id();
+  a:escreva('<nav id="' .. id_nav_menu_flutuante .. '"  class="floating-menu">\n');
+  a:escreva('<div class="menu-button" title="Ocultar painel lateral" onclick="show_menu_flutuante(this, \''.. id_div_menu_flutuante ..'\', \'' .. id_nav_menu_flutuante ..'\')">&#x2630;</div>\n');
+  //a:escreva('<button onclick="show_menu_flutuante(this, \''.. id_div_menu_flutuante ..'\', \'' .. id_nav_menu_flutuante ..'\')">&#x2630;</button>');
+  //a:escreva('<span> Menu</span>\n');
+  a:escreva('<div class="com-rolagem" id="' .. id_div_menu_flutuante .. '" hidden>\n');
+  
+  se tab.funcs[1] entao
+      a:escreva('<div class="caixa ">');
+      a:escreva('<h2>Funções:</h2>\n');
+      tabela.ordene(tab.funcs);
+      para i, v em ipares(tab.funcs) inicio
+          a:escreva(tab.funcs[v],'\n'); 
+      fim
+      a:escreva('\n</div>\n');
+  fim
+  se tab.vars.menu[1] entao
+      a:escreva('<div class="caixa ">');
+      a:escreva('<h2>Variáveis:</h2>\n');
+      tabela.ordene(tab.vars.menu);
+      para i, v em ipares(tab.vars.menu) inicio
+          a:escreva( tab.vars.menu[v],'\n');  
+      fim
+      a:escreva('</div>\n\n');
+  fim
+  
+  se tab.section.menu[1] entao
+      a:escreva('<div class="caixa com-borda">');
+      a:escreva('<h2>Seções:</h2>\n');
+      tabela.ordene(tab.section.menu);
+      para i, v em ipares(tab.section.menu) inicio
+          a:escreva( tab.section.menu[v],'\n');  
+      fim
+      a:escreva('</div>\n\n');
+  fim
+  
+  a:escreva('</div>\n</nav>\n');  
+fim
+
+
+//cria o rodapé
+funcao escreva_footer(a,tab)
+    V('arquivo',a); T(tab);
+    local foot = '<div class="footer"><img src="prisma.png" alt="Prisma logo" width="50"><br>Feito com minidoc-0.1\n<a href="https://linguagemprisma.br4.biz/blog">Linguagem Prisma</a></div>\n';
+    foot = tab.header.raw_footer ou foot;
+    a:escreva(foot);
+fim
+
+//cria o menu com os links da funções documentadas.
+funcao escreva_menu_funcoes(a,tab)
+    V('arquivo',a); T(tab);
+    se nao tab.funcs[1] entao retorne; fim
+    a:escreva('<div>');
+    a:escreva('<h2 >Funções:</h2>\n<ol>\n');
+    para i, v em ipares(tab.funcs) inicio
+        a:escreva('<li>', tab.funcs[v], '</li>\n'); 
+    fim
+    a:escreva('</ol>\n</div>\n\n');
+fim
+
+
+//cria o menu com os links das variáveis documentadas.
+funcao escreva_menu_vars(a,tab)
+    V('arquivo',a); T(tab);
+    se nao tab.vars.menu[1] entao retorne; fim
+    a:escreva('<div>');
+    a:escreva('<h2>Variáveis:</h2>\n<ol>\n');
+    para i, v em ipares(tab.vars.menu) inicio
+        a:escreva( '<li>',tab.vars.menu[v],'</li>\n' ); 
+    fim
+    a:escreva('</ol>\n</div>\n\n');
+fim
+
+
+//cria o menu com os links das seções documentadas.
+funcao escreva_menu_sections(a,tab)
+    V('arquivo',a); T(tab);
+    se nao tab.section.menu[1] entao retorne; fim
+    a:escreva('<div>');
+    a:escreva('<h2>Seções:</h2>\n<ol>\n');
+    para i, v em ipares(tab.section.menu) inicio
+        a:escreva( '<li>', tab.section.menu[v], '</li>\n' ); 
+    fim
+    a:escreva('</ol>\n</div>\n\n');
+fim
+
+
+//Escreve todas as funções documentadas.
+funcao escreva_funcoes(a,tab)
+    V('arquivo',a); T(tab);
+    se nao tab[1] entao retorne fim;
+    a:escreva('<h1>Funções:</h1>\n');   
+    para i,v em ipares(tab) inicio
+       a:escreva(v);
+    fim
+fim
+
+
+//escreve todas as variáveis documentadas
+funcao escreva_vars(a,tab)
+    V('arquivo',a); T(tab);
+    se nao tab.vars[1] entao retorne fim;
+    a:escreva('<h1>Variáveis</h1>\n');
+    para i,v em ipares(tab.vars) inicio
+        a:escreva(v);
+    fim
+fim
+
+
+//escreve todas as seções documentadas
+funcao escreva_sections(a,tab)
+    V('arquivo',a); T(tab);
+    se nao tab.section[1] entao retorne fim;
+    a:escreva('<h1>Seções:</h1>\n');
+    para i,v em ipares(tab.section) inicio
+        a:escreva(v);
+    fim
+fim
+
+//escreve o início do html <html> <header> etc.
+funcao escreva_top(a, tab)
+    V('arquivo',a); T(tab);
+    local html_top = html_top:troque('${page_title}', tab.header.file);
+    a:escreva(html_top);
+fim
+
+
+//escreve o 'header' da 'documentação' (não do html);
+funcao escreva_header(a, tab)
+    V('arquivo',a); T(tab);
+    //a:escreva('<a id="' .. _id_menu_principal .. '" hidden>...</a>');
+                                      //crie_select('Label', 'id', 'atribs ou events', tab_itens);
+    local txt_select_theme, select_id = crie_select('Tema:', 'combo_tema', 'title="Mude o tema html aqui!" onchange="mude_tema(this);"',
+    {
+	    {val='tema_padrao.css', txt = 'Padrão'};
+    })
+    
+    //imprima('---------> select id:', select_id);
+    a:escreva('<div>'..txt_select_theme .. '</div>\n');
+    
+    //document.getElementById('tema_css').href = document.getElementById('id_00002D').value;
+    
+    a:escreva(tab.header.logo ou '');
+    a:escreva(tab.header.fonte);
+    a:escreva(tab.header.autor ou '');
+    a:escreva(tab.header.data ou '');
+    a:escreva(tab.header.versao ou '');
+    local id_resumo = crie_id();
+    se tipo(tab.header.raw_resumo)=='string' entao
+        a:escreva('<br>\n<div>\n'.. html_escape(tab.header.raw_resumo) ..'\n<a href="#' .. id_resumo .. '"> mais...</a></div>\n');
+    fim
+    
+    se tab.funcs[1] ou tab.vars.menu[1] ou tab.section.menu[1] entao
+        a:escreva('<div class="caixa com-borda">');
+          tabela.ordene(tab.funcs);
+          escreva_menu_funcoes(a,tab);
+          tabela.ordene(tab.vars.menu);
+          escreva_menu_vars(a,tab);
+          tabela.ordene(tab.section.menu);
+          escreva_menu_sections(a,tab);
+        a:escreva('</div><br>\n');//fim caixa com borda menu funções e vars..
+    fim //fim se tab.funcs ou ...
+    
+    se tab.header.raw_resumo entao //só aparece o resumo se tiver.
+       a:escreva('\n<h2 id="', id_resumo, '">', tab.header.raw_fonte, '</h2>');
+        a:escreva('<div>\n', (tab.header.raw_resumo ou ''), '\n</div>\n');
+    fim
+      para i,v em ipares(tab.header) inicio
+          a:escreva(v);
+      fim 
+    //a:escreva('</div>');  
+fim
+
+//faz o escape dos caracteres html importantes para serem exibidos e não interpretados.
+funcao html_escape(txt)
+    S(txt);
+    local tab = {
+		['<'] = '&lt;';
+        ['>'] = '&gt;';
+        ["'"] = '&#39;';
+        ['"'] = '&quot;';
+        ['&'] = '&amp;';
+	}
+    retorne (txt:troque('[&<>\'"]', tab));
+fim
+
+
+
+//decodifica html escapado, revertendo ao normal ( ex.: '&lt;' => '<' )
+funcao html_escape_dec(txt)
+    S(txt);
+    local tab = {
+		['&lt;'] = '<';
+        ['&gt;'] = '>';
+        ['&#39;'] = "'";
+        ['&quot;'] = '"';
+        ['&amp;'] = '&';
+		
+	}
+   retorne txt:troque('(&.-;)', tab);
+fim
+
+
+
+/**
+   \fn localize_tag
+   \brief Localiza a primeira tag se houver e retorna o indice inicial, indice final, tag, texto depois da tag até o fim da linha
+   \param s(string) a string onde será feita a busca pela tag;
+   \returns ini(numero ou falso) - índice inicial da string tag se encontra, caso contrário falso; 
+   \returns fini(numero ou nulo) - índice final da tag ou nulo;
+   \returns tag(string) - a tag encontrada.
+   \returns txt(string) - o texto que vai desde o espaço após a tag até o final da string.
+   
+   <p><b>Obs.</b> é necessário deixar um espaço após a tag, ex.:  \\fonte nome_font.pris.</p>
+   <p>Para citar uma tag dentro da documentação como feito acima, é necessário o escape, use duas barras seguidas e a tag será ignorada</p>
+ */
+
+
+funcao localize_tag(s)
+    S(s);
+    local ini, fini;
+    local val, ret_tag;
+    local i, j;
+    i = 1;
+    enquanto i <= #s inicio //enquanto 1
+        //imprima(s[i]);
+        se s[i]=='\\' ou s[i]=='@' entao //barra invertida encontrada ou arroba
+            i = i + 1; //passa para o próximo;
+            se s[i]=='\\' entao //outra barra significa escape, logo é ignorada...
+                i = i+1;
+                vapara continue;
+            senao //econtramos uma possível tag:
+                ini = i;
+                enquanto i <= #s inicio
+                    //imprima(s[i]);
+                    se s[i]==' ' ou s[i] == '\n' ou i>=#s entao  
+                        se i>=#s entao
+                            fini = i;
+                        senao                      
+                            fini = i-1;
+                        fim
+                        //imprimaf('%q\n',s:corte(ini-1,fini) );
+                        retorne ini-1, fini, s:corte(ini-1, fini):apare(), s:corte(fini+2, -1);
+                    senaose s[i]=='\\' entao 
+                        retorne falso, 'Tag mal formada, verifique se há o espaço depois da tag!', '';
+                    fim
+                    //imprimaf(s[i]);
+                    i = i + 1;
+                fim
+            fim
+            
+        fim
+        i = i + 1;
+        ::continue::
+    fim //enquanto 1
+    retorne falso;        
+fim
+
+local funcao procure_tag(s, ...)
+     S(s);
+     local tgs = {...};
+     local ini, fini, tag, txt = localize_tag(s); //procura por uma tag, a primeira e retorna
+     se ini entao
+         para i=1, #tgs inicio
+             se tgs[i]:maiuscula() == tag:maiuscula() entao
+                 retorne ini, fini, tag, txt;
+             fim
+         fim
+     fim
+     //nada foi encontrado, logo o retorno é falso + mensagem de erro.
+     retorne falso, fini;
+fim
+
+//é necessário fazer o escape de strings de busca em prisma.
+local funcao escape_padrao(s)
+    retorne s:troque('[%+%%%-%.%*%[%]%(%)%^%$]',
+    funcao(a)
+        retorne '%'..a;
+    fim);
+fim
+local funcao busque_lin(txt,n)
+    local ini, fin, tmp = 1, 0;
+    para i=1, n inicio
+        ini, fin = txt:procure('\n',fin+1); 
+        se nao ini entao quebre; fim
+    fim
+    retorne fin;
+fim
+local funcao lin_preprocessor_erro(txt, src)
+    local busca = escape_padrao(src);
+    local ini, fini = string.procure(txt, busca);    
+    se ini entao
+        txt = txt:corte(1, ini);
+        local txt, n = txt:troque('\n','\n');//troca os '\n'por'\n' e retorna a quantidade de trocas feitas
+        //imprima('====>', txt[n]);
+        local ini_lin = busque_lin(txt, n);
+        se txt:corte(ini_lin+1,#txt):apare():corte(1,3)=='\\--' entao            
+            retorne nulo, 'coment'; //verifica se a linha começa com \-- se sim é comentário de minidoc.
+        fim
+        retorne n;
+    fim    
+fim
+
+local funcao preprocessor(txt)
+    local orig_txt=txt;
+    local txt = txt:troque('<%%(.-)%%>', funcao(s)
+    estrito.desative();
+        local f, err = carregue(s);
+        se nao f entao 
+            local nerr = convnumero(err:separe(':(%d+):'));
+            local cont, srr = lin_preprocessor_erro(orig_txt, s);
+            se nao cont e srr=='coment' entao retorne ''; fim //retorna pois é comentário doc
+            se nerr entao cont = cont + nerr; fim
+            imprima('------------------------------------------------\n'..
+                    '\t[lin: '..cont.. '] Erro em tempo de carregamento do preprocessador:\n\n'..err); 
+             imprima('\n*Veja o trecho:\n\n', s,'\n');
+             estrito.modo_global(); 
+             retorne '';//troca por string vazia em caso de erro.
+        senao
+            local a, ret = pchame(f);
+            se nao a entao
+                local cont, srr = lin_preprocessor_erro(orig_txt, s)
+                se nao cont e srr=='coment' entao retorne ''; fim //retorna pois é comentário doc
+                local nerr = convnumero(ret:separe(':(%d+):'));
+                se nerr entao cont = cont + nerr; fim
+                imprima('------------------------------------------------\n'..
+                    '\t[lin: '..cont.. '] Erro em tempo de carregamento do preprocessador:\n\n'..ret); 
+                imprima('\n*Veja o trecho:\n\n', s,'\n');
+                estrito.modo_global(); 
+                retorne '';//troca por string vazia em caso de erro.
+            senao //tudo ok entao retorne o resultado da operação:
+                ret = ret ou ' ';//se for nulo então retorna uma string vazia.
+                estrito.modo_global(); 
+                retorne convstring(ret);
+            fim
+        fim
+    fim); 
+    estrito.modo_global();   
+    retorne txt;
+fim
+
+funcao mk_logo(t,i, larg)
+    T(t); N(i,larg); 
+    local img_txt, img_link;
+    local fmt = '<img src="%s" alt="%s" width="%s">\n'
+    local ini, fini, dtag, txt = procure_tag( t[i], '\\logo', '@logo');
+    local primeiro_espaco = txt:apare():procure(' ');
+    se primeiro_espaco entao
+        img_link = txt:corte(1,primeiro_espaco-1);
+        img_txt = txt:corte(primeiro_espaco+1, -1);
+    senao
+        img_link = txt;
+        img_txt = '';
+    fim
+    t.tab.header.logo = string.formate(fmt, img_link:apare(), html_escape(img_txt), convstring(larg));
+fim
+
+
+//  \img 240 my/link/img.png descrição da minha imagem...
+funcao mk_img(t,i, tout)
+    T(t); N(i); 
+    local img_larg, img_desc, img_link, primeiro_espaco, segundo_espaco;
+     //<img src="img_girl.jpg" alt="Girl in a jacket" width="150" height=""> 
+    local fmt = '<img class="com-borda" id="%s" src="%s" alt="%s" width="%s">\n' ..
+[[
+<script>
+    let img_pjs = document.getElementById('%s');
+    img_pjs.onclick = function(){
+        img_pjs.width = (img_pjs.width==%s) ? 800 : %s;
+    }
+</script>
+]]
+    local ini, fini, dtag, txt = procure_tag( t[i], '\\img', '@img');
+    primeiro_espaco = txt:apare():procure(' ');
+    segundo_espaco = txt:apare():procure(' ', primeiro_espaco+1);//procura o próximo espaco se tiver
+    se primeiro_espaco e segundo_espaco entao //foi encontrado um espaco
+        img_larg = txt:corte(1, primeiro_espaco-1);
+        img_link = txt:corte(primeiro_espaco+1, segundo_espaco-1);
+        img_desc = txt:corte(segundo_espaco+1, -1);
+    senao
+        img_larg = '150';
+        img_link = txt:apare();
+        img_desc = '';
+    fim
+    local id = crie_id();
+    tout:insira( string.formate(fmt, id, img_link, img_desc, img_larg, id, img_larg, img_larg) );
+fim
+
+
+funcao mk_fonte(t,i, append)
+    T(t); N(i);  local append = append ou '';
+    local ini, fini, dtag = procure_tag( t[i], '\\file', '\\fonte', '@file', '@fonte');
+    local txt = t[i]:corte(fini+1, -1);
+    t.tab.header.file = txt:apare();
+    t.tab.header.raw_fonte = append .. txt:apare();
+    t.tab.header.fonte = '<h1 id="' .. _id_menu_principal .. '">' .. html_escape(append .. txt) .. '</h1>\n';
+fim
+
+
+funcao mk_autor(t, i, append)
+    T(t); N(i);  local append = append ou '';
+    local ini, fini, dtag = procure_tag( t[i], '\\author', '\\autor', '@author', '@autor');
+    local txt = t[i]:corte(fini+1, -1);
+    t.tab.header.raw_autor = append .. txt:apare();
+    t.tab.header.autor = '<h3>' .. html_escape(append .. txt) .. '</h3>\n';
+fim
+
+funcao mk_header_data(t, i, append)
+    T(t); N(i); local append = append ou '';
+    local ini, fini, dtag = procure_tag( t[i], '\\date', '\\data', '@date', '@data');
+    local txt = t[i]:corte(fini+1, -1);
+    t.tab.header.raw_data = append .. txt:apare();
+    t.tab.header.data = '<h3>' .. html_escape(append .. txt) .. '</h3>\n';
+fim
+
+funcao mk_veja(t, i, tout)
+    T(t); N(i);
+    local ini, fini, dtag = procure_tag( t[i], '\\see', '\\veja', '@see', '@veja');
+    local append = dtag:corte(2,2):maiuscula() .. dtag:corte(3,-1);
+    local txt = t[i]:corte(fini+1, -1);
+    tout:insira('<b>'..append..': </b><a href="' .. txt:apare() .. '">' .. html_escape(txt) .. '</a>\n');
+fim
+
+
+funcao mk_brief(t, i, tout)
+    T(t, tout); N(i);
+    local ini, fini, dtag, txt = procure_tag( t[i],  '\\brief', '@brief', '\\resumo', '@resumo','\\desc', '@desc');
+    
+    //imprima(txt);
+    se t.tab.header == tout entao
+        tout.raw_resumo = txt;
+        tout.resumo = '<p>'.. html_escape(txt) .. '</p>\n';
+    senao
+        tout:insira('<p>'.. html_escape(txt) .. '</p>\n');
+    fim
+fim
+
+funcao mk_header_tag(t,i, tag, atr, append, tabprocure)
+    T(t); N(i);S(tag,atr,append); T(tabprocure);
+    //t,i, 'h3', '', 'Data: ', {'\\date', '\\data', '@date', '@data'})
+    local ini, fini, dtag = procure_tag( t[i], tabela.desempacote(tabprocure) );
+    local txt = t[i]:corte(fini+1, -1);
+    t.tab.header[#t.tab.header+1] = '<'..tag .. ' ' .. atr .. '>' .. html_escape(append .. txt).. '</'..tag.. '>\n';
+
+fim
+
+
+/**
+ *   \fn procure_abertura_header
+ *   \brief procura a abertura de comentário documentado /** ou /*@doc e depois a tag 'file' ou 'fonte'
+ *   \param t(tabela) tabela com as linhas do arquivo aberto.
+ *   \param i(numero) indice atual da linha 
+ *   \returns (numero | falso, str_err) - retorna o índice da linha em caso de sucesso ou falso + mensagem de erro.
+*/
+funcao procure_abertura_header(t,i)
+    T(t); N(i);
+    local open_tag_doc=falso;
+    local fecha_doc = '*/';
+    
+    para idx=i, #t inicio
+        //imprima(idx, t[idx]);
+        se t[idx]:procure('/%*%*') ou  t[idx]:procure('/%*@doc') entao
+            open_tag_doc = verdadeiro;
+        senaose t[idx]:procure('%-%-%[%[%[') ou  t[idx]:procure('%-%-%[%[@doc') entao
+            open_tag_doc = verdadeiro;
+            fecha_doc = '%]%]';
+        fim
+        se open_tag_doc e procure_tag( t[idx], '\\file', '\\fonte', '@file', '@fonte') entao
+            imprima(t[idx]);
+            retorne idx,'Início header encontrado com sucesso!', fecha_doc;
+        fim
+    fim
+    retorne falso, 'Início header não encontrado!';
+fim
+
+local funcao mk_code(t,i,tout)
+            local src = '';
+            local ini, fini, ptag = procure_tag(t[i],'\\codigo','@codigo','\\code', '@code', '\\start_code', '@start_code', '\\inicio_codigo', '@inicio_codigo');
+            local lang_info = t[i]:corte(fini+1, -1):apare();
+            i = i + 2;//pula o \n
+            ptag = ptag .. '--';
+            enquanto i<#t inicio
+                //imprima('--->>>>', t[i]);
+                se procure_tag(t[i], ptag, '\\end_code', '@end_code', '\\fim_codigo', '@fim_codigo') entao
+                    quebre;
+                fim 
+                src = src .. t[i];
+                i = i + 1;
+            fim
+            
+            local id = crie_id();
+            //pre invisível contendo o conteúdo fonte exemplo limpo sem span para ser copiado.
+            tout:insira('<div class="caixa com-borda"><div class="tool-button float-right-top" title="Copiar para área de transferência." onclick="copyText(\''.. id .. '\')">&#128203;</div>&nbsp;<i>' .. lang_info .. '</i>');
+            tout:insira('<pre id="'..id..'" hidden>');
+            //src = insira_linhas(src);
+            //imprima(src);
+            //leia();
+            tout:insira(html_escape(src));
+            tout:insira('</pre>');
+            local colorized = hl.colorize_str(src, hl.lista_prisma);
+           // poe'\n\n-----------------\n';
+            //imprima(colorized);
+            //leia();
+            tout:insira(colorized);
+            //t.tab:insira('</code></pre>\n</div>');
+            tout:insira('\n</div>');
+    retorne i;
+fim
+
+local funcao mk_bloco(t,i, tout)
+//imprima'....................start cooddeeeee';
+            local src = '';
+            local ini, fini, ptag = procure_tag(t[i],'\\bloco','@bloco', '\\block', '@block', '\\start_block', '@start_block', '\\inicio_bloco', '@inicio_bloco');
+            local bloco_info = t[i]:corte(fini+1, -1):apare();
+            i = i + 2; //pula o \n
+            ptag = ptag .. '--';
+            enquanto i<#t inicio
+                se procure_tag(t[i], ptag, '\\end_block', '@end_block', '\\fim_bloco', '@fim_bloco') entao
+                    quebre;
+                fim 
+                src = src .. t[i];
+                i = i + 1;
+            fim
+            local id = crie_id();
+            //pre com o conteúdo já escapado em html:
+            tout:insira('<div><i>' .. bloco_info.. '</i>\n');
+            //tout:insira('<div class="tool-button float-right-top" title="Copiar para área de transferência." onclick="copyText(\''.. id .. '\')">&#128203;</div>&nbsp;<i>' .. bloco_info .. '</i>');
+            tout:insira('<pre class="bloco com-rolagem" id="'..id..'">');            
+            tout:insira('<code>');
+            tout:insira(html_escape(src));
+            tout:insira('</code></pre>\n</div>');
+    retorne i;
+fim
+
+local funcao mk_footer(t,i, tout)
+    T(t,tout); N(i); 
+    local ini, fini, dtag = procure_tag( t[i], '\\footer', '\\rodape','\\rodapé', '@footer', '@rodape', '@rodapé');
+    local txt = t[i]:corte(fini+1,-1);
+    i = i + 1; //pula a tag encontrada;
+    local dtag_end = dtag..'--';
+    enquanto i<#t inicio
+        se procure_tag(t[i], dtag_end, '\\end_footer', '@end_footer', '\\fim_rodape', '@fim_rodape','\\fim_rodapé', '@fim_rodapé') 
+        entao
+            quebre;
+        fim 
+        txt = txt .. t[i];
+        i = i + 1;
+    fim
+   // txt = preprocessor(txt);
+    t.tab.header.raw_footer =  '<footer class="footer">\n'.. txt .. '</footer>\n';
+    retorne i;
+fim
+
+local funcao mk_obs(t,i,tout)
+    local ini, fini, tag, txt = procure_tag(t[i], '\\obs','@obs');
+    tout:insira( '<p><i><b>Obs.: </b>' .. html_escape(txt) .. '</i></p>' );
+fim
+
+local funcao mk_titulo(t,i, tout)//(t,i, tout); 
+    local ini, fini, tag, txt =  procure_tag( t[i], '\\title', '@title' , '\\titulo', '@titulo');
+    tout:insira('<h1>' .. html_escape(txt) .. '</h1>');
+fim
+
+local funcao mk_subtitulo(t,i, tout)//(t,i, tout); 
+    local ini, fini, tag, txt =  procure_tag( t[i], '\\subtitle', '@subtitle' , '\\subtitulo', '@subtitulo');
+    tout:insira('<h2>' .. html_escape(txt) .. '</h2>');
+fim
+
+local funcao mk_h (t, i, tout)
+    local ini, fini, tag, txt = procure_tag( t[i],'\\h1', '\\h2', '\\h3', '\\h4', '\\h5', '\\h6',
+                                                  '@h1', '@h2', '@h3', '@h4', '@h5', '@h6' );
+    local s = '<'..tag:corte(2,3) .. '>' .. html_escape(txt) .. '</'..tag:corte(2,3) .. '>\n';
+    tout:insira(s);
+fim
+
+//    \link http:\\meulink.com minha descrição aqui até o final da linha
+local funcao mk_link(t,i, tout)//(t,i, tout); 
+    local ini, fini, tag, txt =  procure_tag( t[i], '\\link', '@link');
+    local primeiro_espaco = txt:apare():procure(' ');//procura o primeiro espaço após o link.
+    local meu_link, txt_link;
+    se nao primeiro_espaco entao
+        meu_link = txt:apare(); txt_link = txt:apare();
+    senao
+        meu_link = txt:corte(1,primeiro_espaco-1);
+        txt_link = txt:corte(primeiro_espaco+1, -1):apare();
+    fim
+        
+    se txt_link=='' entao //caso não haja nada somente o link, então o próprio link é o texto;
+        txt_link = meu_link;
+    fim
+    tout:insira('<a target="_blank" href = "' .. meu_link .. '">' .. html_escape(txt_link) .. '</a>');
+fim
+
+local funcao mk_parag(t,i,tout)
+    local ini, fini, tag, txt =  procure_tag(t[i],'\\parag', '@parag', '\\inicio', '@inicio', '\\start', '@start', '\\inicio_parag', '@inicio_parag','\\start_parag', '@start_parag');
+    txt = txt ou '';
+    local i = i+1;
+    
+    enquanto i<=#t inicio
+        se procure_tag( t[i], tag..'--', '\\fim', '@fim', '\\end', '@end', '\\fim_parag', '@fim_parag', '\\end_parag', '@end_parag') entao
+            quebre;
+        fim
+        txt = txt .. t[i];
+        i=i+1;            
+    fim
+    tout:insira('<p>\n'.. html_escape(txt) .. '\n</p>');
+    retorne i;
+fim
+
+local funcao mk_list(t,i,tout)
+    local ini, fini, tag, txt =  procure_tag(t[i],'\\lista','@lista','\\list', '@list', '\\start_list', '@start_list', '\\inicio_lista', '@inicio_lista');
+    local i = i+1;
+    tout:insira('<ul>\n');
+    enquanto i<=#t inicio
+        se procure_tag( t[i], tag..'--', '\\fim_lista', '@fim_lista', '\\end_list', '@end_list') entao
+            quebre;
+        fim
+        se t[i]<>'\n' entao
+            tout:insira('<li>' .. html_escape(t[i])..'</li>\n');
+        fim
+        i=i+1;            
+    fim
+    tout:insira('</ul>\n');
+    retorne i;
+fim
+
+local funcao mk_caixa_doc(t,i,tout)
+    local ini, fini, tag, txt =  procure_tag(t[i],'\\caixa_doc','@caixa_doc','\\doc_box','@doc_box');
+    tout:insira('<section class="caixa-doc">\n');
+    tout:insira('<span class="float-right-top" ><a href="#" title="Voltar ao menu funções.">Voltar ao início  </a></span>');
+    tout:insira('<h2 class="subtitulo-doc">'.. html_escape(txt)  ..  '</h2>');
+    tout:insira('<div class="corpo-doc">');
+fim
+
+
+//função para processar as tags comuns em header, fn, vars e seção
+local funcao comum_process(t,i,tout)
+    local i = i;
+    se  procure_tag( t[i], '\\obs', '@obs')  entao
+            mk_obs(t,i, tout);//(t,i, tout);  
+        
+        senaose procure_tag( t[i],  '\\brief', '@brief', '\\resumo', '@resumo','\\desc', '@desc') entao
+            mk_brief(t,i,tout);
+        senaose procure_tag(t[i],'\\caixa_doc','@caixa_doc','\\doc_box','@doc_box') entao
+            mk_caixa_doc(t,i,tout);
+            
+        senaose procure_tag(t[i],'\\caixa_doc--','@caixa_doc--','\\doc_box--','@doc_box--') entao
+            tout:insira('</div>\n</section>\n'); //para finalizar a caixa_doc 
+            
+        senaose procure_tag( t[i], '\\see', '\\veja', '@see', '@veja') entao                        
+            mk_veja(t,i, tout);
+        
+        senaose  procure_tag( t[i], '\\title', '@title' , '\\titulo', '@titulo')  entao
+            mk_titulo(t,i, tout);//(t,i, tout);   
+        
+        senaose procure_tag( t[i], '\\subtitle', '@subtitle' , '\\subtitulo', '@subtitulo') entao
+            mk_subtitulo(t,i, tout)//(t,i, tout); 
+        
+        senaose procure_tag( t[i],'\\h1', '\\h2', '\\h3', '\\h4', '\\h5', '\\h6',
+                                                  '@h1', '@h2', '@h3', '@h4', '@h5', '@h6' ) entao
+           mk_h(t,i, tout);
+        
+        senaose procure_tag(t[i], '\\link', '@link') entao
+            mk_link(t, i, tout); 
+        
+        senaose procure_tag(t[i], '\\img', '@img') entao
+            mk_img(t, i, tout);
+        
+        senaose procure_tag(t[i],'\\lista', '@lista', '\\list', '@list', '\\start_list', '@start_list', '\\inicio_lista', '@inicio_lista') entao
+            i = mk_list(t, i, tout);
+       
+       senaose procure_tag(t[i],'\\parag','@parag','\\inicio', '@inicio', '\\start', '@start', '\\inicio_parag', '@inicio_parag','\\start_parag', '@start_parag') entao
+            i = mk_parag(t, i, tout);
+            
+        senaose procure_tag(t[i],'\\code', '@code', '\\codigo','@codigo', '\\start_code', '@start_code', '\\inicio_codigo', '@inicio_codigo') entao
+            i = mk_code(t,i, tout);
+            
+           //bloco_html para o header...
+        senaose procure_tag(t[i],'\\bloco', '@bloco','\\block', '@block', '\\start_block', '@start_block', '\\inicio_bloco', '@inicio_bloco')  entao
+            i = mk_bloco(t,i, tout);
+        senaose procure_tag( t[i], '\\footer', '\\rodape','\\rodapé', '@footer', '@rodape', '@rodapé') entao             
+            i = mk_footer(t,i, tout);
+    senaose t[i]:apare():corte(1,3)=='\\--' então //comentário doc até o fim da linha não sai na documentação  
+            i = i + 1; //pula esta linha pois é um comentário:      
+    senao  
+            t[i] = t[i]:troque('\\\\','\\'); //caso tenha duas barras (escape de barra \\) é trocado por uma só.
+            //t[i] = preprocessor(t[i]);
+            tout:insira(t[i]); //aqui não é usada a função html_escape(); fica a cargo do programador
+                                       //para produzir a saída '*/' use o código html '&#42;/'
+    fim
+        retorne i;
+fim
+
+local funcao verifique_header(t,i, fecha_doc)
+    T(t); N(i);
+    local i = 1;
+    local i, err, fecha_doc = procure_abertura_header(t,i)
+    //imprima('retorne abertura header teste', i,err);
+    se nao i entao retorne falso, err; fim
+    local header_ok = falso;
+    t.tab.header = {desc=''};
+    funcao t.tab.header:insira(txt)
+        este[#este+1] = txt;
+    fim
+    enquanto i <= #t inicio
+      // imprima(i);
+        se nao t[i] ou i>=#t ou t[i]:procure(fecha_doc)entao
+           //imprima('saindo....', i, t[i]);
+            quebre;
+        fim
+        se procure_tag( t[i], '\\file', '\\fonte', '@file', '@fonte') entao
+            header_ok = verdadeiro;  
+            //imprima('achou---------------');        
+            mk_fonte(t,i,'');
+            
+        senaose procure_tag( t[i], '\\author', '\\autor', '@author', '@autor') e header_ok entao                        
+            mk_autor(t,i, '');
+
+        senaose procure_tag( t[i], '\\date', '\\data', '@date', '@data') e header_ok entao  
+            mk_header_data(t,i,'');                    
+            //mk_header_tag(t,i, 'h3', '', '', {'\\date', '\\data', '@date', '@data'});
+            
+
+        senaose procure_tag( t[i], '\\version', '\\versao','\\versão', '@version', '@versao','@versão') entao              
+            local ini, fini, tag, txt = procure_tag( t[i], '\\version', '\\versao','\\versão', '@version', '@versao','@versão');
+            t.tab.header.versao = '<h3>'.. html_escape(txt) .. '</h3>';
+        senaose  procure_tag( t[i], '\\logo', '@logo')  entao
+            mk_logo(t,i, 150)
+        
+        senao 
+            i = comum_process(t,i, t.tab.header);    //processamento comum para header, funçao, var e seção;                
+        fim
+        i = i + 1;
+    fim
+    
+    se nao header_ok entao retorne falso, 'Tag header incompleta ou inexistente'; fim
+
+    retorne i;
+fim
+
+local funcao mk_html_tag(t,i, tag, atr, append, tabprocure)
+    T(t); N(i);S(tag,atr,append); T(tabprocure);
+    //t,i, 'h3', '', 'Data: ', {'\\date', '\\data', '@date', '@data'})
+    local ini, fini, dtag = procure_tag( t[i], tabela.desempacote(tabprocure) );
+    local txt = t[i]:corte(fini+1, -1);
+    t.tab[#t.tab+1] = '<'..tag .. ' ' .. atr .. '>' .. html_escape(append .. txt).. '</'..tag.. '>\n';
+fim
+
+local funcao mk_html_tag_var(t,i, tag, atr, append, tabprocure)
+    T(t); N(i);S(tag,atr,append); T(tabprocure);
+    //t,i, 'h3', '', 'Data: ', {'\\date', '\\data', '@date', '@data'})
+    local ini, fini, dtag = procure_tag( t[i], tabela.desempacote(tabprocure) );
+    local txt = t[i]:corte(fini+1, -1);
+    t.tab.vars:insira('<'..tag .. ' ' .. atr .. '>' .. html_escape(append .. txt).. '</'..tag.. '>\n');
+fim
+
+local funcao pule_fecha_comentario(t,i)
+    T(t); N(i);
+    para idx = i, #t inicio
+        se t[idx]:procure(t.fecha_doc) entao
+            retorne idx+1;
+        fim
+    fim
+    retorne i;
+fim
+
+local funcao processe_funcao(t,i, fecha_doc)
+    T(t); N(i);
+    local id = crie_id();
+    local parametros = falso; //quando a primeira tag param ativar é inserida o H2 'Parâmetros:'
+    local retornos = falso;
+    local lin_fn, nome_fn = obt_nome_funcao(t,i, fecha_doc);
+    
+    enquanto i <= #t inicio
+        //imprima(t[i]);
+        se t[i]:procure(fecha_doc) entao 
+            //t.tab.vars:insira('</div>\n');
+            t.tab:insira('</div>\n');
+            t.tab:insira('</section>\n'); 
+            retorne i;             
+        fim
+        
+        se procure_tag(t[i], '\\fn', '@fn', '\\funcao', '@funcao', '\\função', '@função') entao
+            local ini, fini, dtag, val = procure_tag(t[i], '\\fn', '@fn', '\\funcao', '@funcao', '\\função', '@função');
+            se nao nome_fn entao nome_fn = val; fim
+            se nao lin_fn entao lin_fn = 'funcao ' .. nome_fn .. '()'; fim
+            t.tab.funcs[nome_fn] = '<a href="#' .. id .. '">' .. nome_fn .. '</a>';
+            t.tab.funcs:insira(nome_fn);
+            t.tab:insira('<a id="'.. id ..'" hiden></a>\n');           
+            t.tab:insira('<section class="caixa-doc">\n');
+           // t.tab:insira('<span class="float-right-top" ><a href="#' .. _id_menu_principal .. '" title="Voltar ao menu funções.">Voltar ao início  </a></span>');
+            t.tab:insira('<span class="float-right-top" ><a href="#" title="Voltar ao menu funções.">Voltar ao início  </a></span>');
+           // t.tab:insira('<h2 class="titulo-doc">' .. nome_fn .. '()</h2>');
+            t.tab:insira('<h2 class="subtitulo-doc">'.. lin_fn  ..  '</h2>');
+            t.tab:insira('<div class="corpo-doc">');
+               
+        senaose procure_tag(t[i], '\\param', '@param') entao
+            se nao parametros entao
+                parametros = verdadeiro;
+                t.tab:insira('<div class="titulo-params"><h3>Parâmetros:</h3></div>');
+            fim
+            
+            t.tab:insira('<div class="params-doc">');
+            mk_html_tag(t,i,'span', '', '' , {'\\param', '@param'});
+            t.tab:insira('</div>');
+            
+       senaose procure_tag(t[i], '\\returns', '@returns','\\return', '@return', '\\retorno', '@retorno') entao
+            se nao retornos entao
+                retornos = verdadeiro;
+                t.tab:insira('\n<div class="titulo-returns"><h3>Retornos:</h3></div>');
+            fim
+            
+            t.tab:insira('<div class="returns-doc">');
+            //class="params">
+            //<tr><td class="paramname"
+            mk_html_tag(t,i,'span', '', '    ' , {'\\returns', '@returns','\\return', '@return', '\\retorno', '@retorno'});
+            t.tab:insira('</div>');
+        senao
+            i = comum_process(t,i,t.tab); //t.tab[#t.tab+1] = t[i];
+        fim
+        i = i + 1;
+    fim
+    retorne i;
+fim
+
+local funcao processe_var(t,i, fecha_doc)
+    T(t); N(i);
+        local id = crie_id();
+    local parametros = falso; //quando a primeira tag param ativar é inserida o H2 'Parâmetros:'
+    local retornos = falso;
+    local lin_var, nome_var = obt_nome_var(t,i, fecha_doc);
+    //imprima(lin_var);
+    se nao lin_var entao
+        retorne nome_var;
+    fim
+    enquanto i <= #t inicio
+        //imprima(t[i]);
+        se t[i]:procure(fecha_doc) entao 
+           // imprima('saindo------------', t[i]);
+            t.tab.vars:insira('</div>\n');
+            t.tab.vars:insira('</section>\n'); 
+            retorne i;             
+        fim
+        
+       se procure_tag(t[i], '\\var', '@var', '\\variavel', '@variavel', '\\variável', '@variável') entao
+            
+            t.tab.vars:insira_menu( nome_var );
+            t.tab.vars.menu[nome_var] = '<a href="#' .. id .. '">' .. nome_var .. '</a>';
+            t.tab.vars:insira('<a id="'.. id ..'" hiden></a>\n');
+            t.tab.vars:insira('<section class="caixa-doc">\n');
+            //t.tab.vars:insira('<h2>' .. nome_var .. ' = </h2>');
+            //t.tab.vars:insira('<span class="float-right-top" ><a href="#' .. _id_menu_principal .. '" title="Voltar ao menu funções.">Voltar ao início  </a></span>');
+            t.tab.vars:insira('<span class="float-right-top" ><a href="#" title="Voltar ao menu funções.">Voltar ao início  </a></span>');
+            t.tab.vars:insira('<h2 class="subtitulo-doc">' .. lin_var  ..  '</h2>');
+            t.tab.vars:insira('<div class="corpo-doc">');   
+            
+        
+        senao 
+            i = comum_process(t, i, t.tab.vars); // t.tab.vars:insira(t[i]);
+        fim
+        i = i + 1;
+    fim
+    retorne i;
+    
+fim
+
+
+
+local funcao processe_section(t,i,fecha_doc)
+    T(t); N(i);
+    local id = crie_id();
+    enquanto i <= #t inicio
+        //imprima(t[i]);
+        //imprima(fecha_doc);
+        se t[i]:procure(fecha_doc) entao 
+            //imprima('saindo------------ de section', t[i]);
+            t.tab.section:insira('</div>\n');
+            t.tab.section:insira('</section>\n'); 
+            retorne i;             
+        fim
+        
+       se procure_tag(t[i], '\\seção', '\\section', '@seção', '@section')  entao
+            local ini, fini, dtag, nome_section = procure_tag(t[i], '\\seção', '\\section', '@seção', '@section');
+            t.tab.section:insira_menu( nome_section );
+            t.tab.section.menu[nome_section] = '<a href="#' .. id .. '">' .. nome_section .. '</a>';
+            t.tab.section:insira('<a id="'.. id ..'" hiden></a>\n');
+            t.tab.section:insira('<section class="caixa-doc">\n');
+            //t.tab.section:insira('<h2>' .. nome_var .. ' = </h2>');
+           // t.tab.section:insira('<span class="float-right-top" ><a href="#' .. _id_menu_principal .. '" title="Voltar ao menu funções.">Voltar ao início  </a></span>');
+           t.tab.section:insira('<span class="float-right-top" ><a href="#" title="Voltar ao menu funções.">Voltar ao início  </a></span>');
+            t.tab.section:insira('<h2 class="subtitulo-doc">' .. nome_section  ..  '</h2>');
+            t.tab.section:insira('<div class="corpo-doc">');   
+            
+        senao 
+            i = comum_process(t, i, t.tab.section); // t.tab.section:insira(t[i]);
+        fim
+        i = i + 1;
+    fim
+    retorne i;
+    
+fim
+
+
+local funcao processe(t,i, fecha_doc)
+    T(t); N(i);
+    enquanto i<=#t inicio
+        se t[i]:procure(fecha_doc) entao
+            retorne i + 1;
+        fim
+        se procure_tag(t[i], '\\fn', '@fn', '\\funcao', '@funcao', '\\função', '@função') entao
+            i = processe_funcao(t,i, fecha_doc);
+            retorne i;
+        senaose  procure_tag(t[i], '\\var', '@var', '\\variavel', '@variavel', '\\variável', '@variável') entao
+            i = processe_var(t,i, fecha_doc);
+            retorne i;
+        senaose procure_tag(t[i], '\\seção', '\\section', '@seção', '@section') entao
+            i = processe_section(t,i, fecha_doc);
+            retorne i;
+        fim
+        i = i + 1;
+    fim
+    retorne i;
+fim
+
+local função abre_doc(t,i)
+       T(t); N(i);
+       se t[i]:procure('/%*%*') ou t[i]:procure('/%*@doc') entao
+          t.fecha_doc = '%*/';
+          retorne '%*/';
+        senaose t[i]:procure('%-%-%[%[%[') ou t[i]:procure('%-%-%[%[@doc') entao
+            t.fecha_doc = '%]%]';
+            retorne '%]%]';
+        fim
+fim
+
+funcao processe_fonte(txt)
+    S(txt);
+    local t = analise(txt);
+    local i = 1;
+    t.tab = {};
+    funcao t.tab:insira(txt)
+        este[#este+1] = txt;
+    fim
+    
+    t.tab.funcs = {}; //tabela para guardar os nomes das funções.
+    funcao t.tab.funcs:insira(txt)
+        este[#este+1] = txt;
+    fim
+    t.tab.vars = {}; //lugar onde serão guardadas as variáveis.
+    t.tab.vars.menu={};
+    funcao t.tab.vars:insira(txt)
+        este[#este+1] = txt;
+    fim
+    funcao t.tab.vars:insira_menu(txt)
+        este.menu[#este.menu+1] = txt;
+    fim
+    
+    t.tab.section = {menu={}};
+    funcao t.tab.section:insira(txt)
+        este[#este+1] = txt;
+    fim
+    funcao t.tab.section:insira_menu(txt)
+        este.menu[#este.menu+1]=txt;
+    fim
+    
+    i = verifique_header(t, i);
+    //imprima('verifique header ', i);
+    se nao i  entao retorne falso, 'cabeçalho não encontrado'; fim
+    
+    
+    
+    enquanto i<=#t inicio
+        local fecha_doc = abre_doc(t, i);
+        se fecha_doc entao
+            i = processe(t,i, fecha_doc);
+        fim
+        i = i+1;        
+    fim    
+    retorne t.tab;
+fim
+
+
+
+funcao obt_nome_var(t,i)
+    T(t); N(i);
+    local i = pule_fecha_comentario(t,i);
+    local lin_var = '';
+    local tmp_i = i;
+    enquanto 1 inicio
+        se t[i]:procure'/%*%*' ou  t[i]:procure'/%*@doc'  ou i>= #t entao
+            se i >= #t entao
+                erro('Variável não encontrada, final de arquivo, inicio doc: '.. convstring(tmp_i) );
+            fim
+            retorne falso, i-1;
+        senaose t[i]:procure'=' entao
+            lin_var = t[i];
+            quebre;
+        fim        
+        i = i + 1;
+    fim   // local var = ...
+    local var_nome = lin_var:separe('local%s(.*)=')
+    se nao var_nome entao 
+        var_nome = lin_var:separe('(.*)=');
+    fim
+    retorne lin_var, var_nome;
+fim
+
+
+funcao obt_nome_funcao(t,i)
+    T(t); N(i);
+    local tmp_i = t[i];//a linha onde foi encontrada a tag função
+    local i = pule_fecha_comentario(t,i); //pula todo o restante do comentário, evita interpretar nome de função no
+                                          //bem no meio de um comentário.
+    local lin_func = '';
+    enquanto 1 inicio
+        //imprima(t[i]);
+        se abre_doc(t,i)  ou i>= #t entao
+            se i >= #t entao
+                erro('Função não encontrada, final de arquivo, inicio doc: '.. convstring(tmp_i) );
+            fim
+            retorne i-1;
+        senaose t[i]:procure'funcao' ou t[i]:procure'função' entao
+            lin_func = t[i];
+            quebre;
+        fim        
+        i = i + 1;
+    fim   // local funcao ola(a,b,c)
+    local so_nome = lin_func:separe('funcao%s(.*)%(')
+    se nao so_nome entao 
+        //imprima('dentro');
+        so_nome = lin_func:separe('local (.*)=') ou lin_func:separe('(%w+.*)=') ou lin_func:separe('[%s%w]+%s(.*)=') 
+    fim
+    retorne lin_func, so_nome;
+fim
+
+
+
+funcao analise(txt)
+    S(txt);
+    local t = string.analise(txt, '\n\r');
+    se nao t entao retorne {txt}; fim
+    retorne t;
+fim
+
+
+funcao grave_arquivo(file, txt)
+    S(file);
+    local a,err = es.abra(file, 'eb');
+    se nao a entao erro(err); fim
+    a:escreva(txt);
+    a:feche();
+fim
+
+funcao leia_arquivo(file)
+    S(file);
+    local a,err = es.abra(file, 'lb');
+    se nao a entao erro(err); fim
+    local txt = a:leia('*t');
+    txt = preprocessor(txt);
+    //imprima(txt);
+    a:feche();
+    retorne txt;
+fim
+
+
+html_top = [[
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8"/>
+
+<meta name="generator" content="minidoc.prisma 0.1"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+
+<title>${page_title}</title>
+<LINK id="tema_css" REL="stylesheet" TYPE="text/css" href="" />
+<script src="temas_itens.json"></script>
+<script src="index.js"></script>
+
+</head>
+<body>
+]]
+
+//${onload_func} será substituído pelo id gerado do select em escreva_header acima.
+
+html_end = [[
+</body>
+</html>
+]]
+
+//###############################################################
+
+
+html_padrao_css = [[
+html {
+	background-color: #F8F8F8 ;
+	//scroll-behavior:smooth;
+	
+}
+
+
+body {
+	background-color: #FFFFFF ;
+	color: #000000 ;
+	font-family: Helvetica, Arial, sans-serif ;
+	font-size: 16px;
+	text-align: justify ;
+	line-height: 1.25 ;
+	margin: 16px auto ;
+	padding: 32px ;
+	border: solid #ccc 1px ;
+	border-radius: 10px ;
+	max-width: 70em ;
+	width: 90% ;
+
+    word-break: break-word;
+}
+
+h1, h2, h3, h4, .titulo {
+	color: #000080 ;
+	font-family: Verdana, Geneva, sans-serif ;
+	font-weight: normal ;
+	font-style: normal ;
+	text-align: left ;
+}
+
+h1 {
+	font-size: 28pt ;
+}
+
+.sec {
+	vertical-align: text-bottom ;
+}
+
+h2:before {
+	content: "\2756" ;
+	padding-right: 0.5em ;
+}
+
+.bloco {
+   padding: 0px;
+   margin-bottom: 60px;
+   margin-right: 5px;
+   margin-top: 30px;
+}
+
+.caixa {
+   padding: 0px;
+   margin-bottom: 60px;
+   margin-right: 5px;
+   margin-top: 30px;
+}
+
+.com-borda {
+   border: 1px solid #d5d5d5;
+   padding:1px 1px 1px 1px;
+   border-radius: 5px;
+}
+
+.com-corfundo{
+	background-color: #DFE5F1;
+}
+
+.caixa-doc {
+	    margin-top: 20px;
+        margin-bottom: 60px;
+        border-radius: 2px;
+        padding-top: 10px;
+        color: #253555;
+        /*font-weight: bold;*/
+        text-shadow: 0px 1px 1px rgba(255, 255, 255, 0.9);
+        background-color: #DFE5F1;
+        border: 1px solid #aaaaF1;
+        /* opera specific markup */
+        box-shadow: 5px 5px 5px rgba(0, 0, 0, 0.15);
+        border-top-right-radius: 10px;
+        border-top-left-radius: 10px;
+        /* firefox specific markup */
+        -moz-box-shadow: rgba(0, 0, 0, 0.15) 5px 5px 5px;
+        -moz-border-radius-topright: 10px;
+        -moz-border-radius-topleft: 10px;
+        /* webkit specific markup */
+        -webkit-box-shadow: 5px 5px 5px rgba(0, 0, 0, 0.15);
+        -webkit-border-top-right-radius: 10px;
+        -webkit-border-top-left-radius: 10px;
+} 
+
+.params-doc, .returns-doc {
+	font-weight: bold;
+	text-shadow: 0px 1px 1px rgba(255, 255, 255, 0.9);
+	color: brown;
+	margin-top: 10px;
+	margin-left: 40px;
+	margin-right: 10px;
+	margin-bottom: 20px;
+}
+
+.params-doc:before, .returns-doc:before {
+	content: "\2756" ;
+	padding-right: 0.5em ;
+}
+
+.titulo-doc, .subtitulo-doc {
+    margin: 10px;
+}
+
+float-left-top {
+    position:relative;
+    top: 5px;
+    left: 5px;
+    float: left;
+}
+
+.float-right-top {
+    position:relative;
+    top: 5px;
+    right: 5px;
+    float: right;
+}
+
+
+.float-left-bottom {
+    position:relative;
+    bottom: 5px;
+    left: 5px;
+    float: left;
+}
+
+.float-right-bottom {
+    position:relative;
+    bottom: 5px;
+    right: 5px;
+    float: right;
+}
+
+
+
+
+.corpo-doc {
+        /*border-bottom: 1px solid #A8B8D9;  */    
+        border-left: 1px solid #A8B8D9;      
+        border-right: 1px solid #A8B8D9; 
+        padding: 6px;
+        background-color: #FBFCFD;
+        border-top-width: 0;
+        background-repeat:repeat-x;
+        background-color: #FFFFFF;
+        /* opera specific markup */
+        border-bottom-left-radius: 2px;
+        border-bottom-right-radius: 2px;
+        /*box-shadow: 5px 5px 5px rgba(0, 0, 0, 0.15);*/
+        /* firefox specific markup */
+        -moz-border-radius-bottomleft:2px;
+        -moz-border-radius-bottomright: 2px;
+        -moz-box-shadow: rgba(0, 0, 0, 0.15) 5px 5px 5px;
+        /* webkit specific markup */
+        -webkit-border-bottom-left-radius: 2px;
+        -webkit-border-bottom-right-radius: 2px;
+        -webkit-box-shadow: 5px 5px 5px rgba(0, 0, 0, 0.15);
+        margin-bottom: 0px;
+        border-radius: 1px;
+        color: black;
+}
+
+
+
+pre{
+  margin: 2px; 
+  padding: 4px;
+}
+
+
+
+.footer {
+	color: gray ;
+	font-size: x-small ;
+	text-transform: lowercase ;
+	text-align:center;
+}
+
+
+.com-rolagem{
+        /*border: 2px solid #000;*/
+        padding: 1px;
+        overflow-y: auto;
+        height: 90%;
+ }
+ 
+ 
+ .tool-button{
+	background-color: #ffffff;
+	border: 0px solid #ffffff;
+    border-radius: 5px;
+    font-size: 16px;
+    padding: 0px;
+    width: 16px;
+    height: 16px;
+    cursor: pointer;	 
+ }
+ 
+ .menu-button {
+    background-color: #ffffff;
+    color: #000080;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    text-align: left;
+    font-size: 24px;
+    padding: 0px;
+    cursor: pointer;
+}
+
+ .floating-menu {
+    font-family: sans-serif;
+    background: #ffffff;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    color: black;
+    padding: 0px;;
+    /*width: 5px;*/
+    z-index: 100;
+    position: fixed;
+    top: 5px;
+    left: 5px;
+    height: auto;
+  }
+  
+  .floating-menu h1 {
+    font-size: 13px;
+    display: block;
+    margin: 0 0.5em;
+    color: blue;
+  }
+
+  .floating-menu a {
+    font-size: 13px;
+    display: block;
+    margin: 0 0.5em;
+    color: blue;
+  }     
+      
+        
+]]
+
+//###############################################################
+
+html_index_js = [[
+
+function copyText(pre) {
+	 function htmlDecode(input) {
+         var doc = new DOMParser().parseFromString(input, "text/html");
+         return doc.documentElement.textContent;
+     }
+	 let cod = document.getElementById(pre);
+	 let txt = cod.innerHTML;
+	 let result = htmlDecode(txt);
+	 if ( result === "" ){
+		 result = txt;
+	 }
+	 alert("Copiado para área de transferência.");
+     
+            /* Copy text into clipboard */
+            navigator.clipboard.writeText(result);
+                 
+}
+   
+
+function show_menu_flutuante(bt, divm, navm){
+	       let navmenu = document.getElementById(navm);
+		   let divmenu = document.getElementById(divm);
+		   if( divmenu.hidden ){
+			   //bt.innerHTML = '&gt;';
+			   bt.title="Ocultar painel lateral";
+			   divmenu.hidden = false;
+			   navmenu.style.height_old = navmenu.style.height;
+			   navmenu.style.height = '97%';
+			   
+			   //alert('ola');
+		   }else{
+			  //bt.innerHTML = '&#x2630';
+			  bt.title="Mostrar painel lateral";
+		      divmenu.hidden = true;
+		      navmenu.style.height = navmenu.style.height_old;
+		   }
+}
+
+
+function def_valor(key,val){
+	if (typeof(Storage) !== "undefined") {
+	    localStorage.setItem( key, val);
+    } else {
+       console.log("Sorry! No Web Storage support..");
+    }	
+}
+
+function obt_valor(key){
+	if (typeof(Storage) !== "undefined") {
+	    return localStorage.getItem( key);
+    } else {
+       console.log("Sorry! No Web Storage support..");
+    }	
+    return null;
+}
+
+function mude_tema(select){
+	let tema_css = document.getElementById('tema_css');
+	tema_css.href = select.value;
+	def_valor('tema_atual', select.value);
+}
+
+function set_tema_onload(id){
+	let tema_atual = obt_valor('tema_atual'); //local storage;
+	if (tema_atual===null) tema_atual = 'tema_padrao.css';
+	let tema_css = document.getElementById('tema_css');
+	let select = document.getElementById('combo_tema');
+	select.value = tema_atual;
+	tema_css.href = select.value;
+}
+
+function select_insira(select, txt, val){
+	let option = document.createElement("option");
+    option.text = txt;
+    option.value = val;
+    select.appendChild(option);
+	
+}
+
+function select_temas_inclua_itens(){
+    let select = document.getElementById('combo_tema');
+    let itens = tema.itens; //está em temas_itens.js podendo adicionar mais temas.
+    for ( i=0; i<itens.length;i++){
+		select_insira(select, itens[i].txt, itens[i].val);	
+	}	
+}
+
+document.addEventListener("DOMContentLoaded", function(event) {
+	select_temas_inclua_itens(); //preenche o select de temas com mais opções além do padrão.
+	set_tema_onload();
+});
+
+
+]]
+
+temas_json = [[
+
+    var tema = {
+		itens: [
+            {val: 'tema_dark.css', txt: 'Dark'},
+	        {val: 'light_simple.css', txt: 'light simples'}   
+        ]
+}
+
+
+]]
+
+//#####################################################################
+
+html_light_css = [[
+    
+
+body {
+  background-color: #ffffff;
+  color: #000000;
+  margin: 40px;
+  
+}
+
+h1, h2, h3, h4, .titulo {
+	color: #000080 ;
+	font-family: Verdana, Geneva, sans-serif ;
+	font-weight: normal ;
+	font-style: normal ;
+	text-align: left ;
+}
+
+h2:before {
+	content: "\2756" ;
+	padding-right: 0.5em ;
+}
+
+.com-corfundo{
+	background-color: white;
+}
+
+
+.com-corletra-black{
+	color: black;
+}
+.com-corletra-white{
+	color: white;
+}
+
+.caixa-doc {
+	    margin-top: 20px;
+        margin-bottom: 60px;
+        border-radius: 2px;
+        padding-top: 10px;
+        color: #253555;
+} 
+
+.params-doc, .returns-doc {
+	/*font-weight: bold;
+	text-shadow: 0px 1px 1px rgba(255, 255, 255, 0.9);
+	color: brown;*/
+	margin-top: 10px;
+	margin-left: 40px;
+	margin-right: 10px;
+	margin-bottom: 20px;
+}
+
+.params-doc:before, .returns-doc:before {
+	content: "\2756" ;
+	padding-right: 0.5em ;
+}
+
+.titulo-doc, .subtitulo-doc {
+    margin: 10px;
+}
+
+float-left-top {
+    position:relative;
+    top: 5px;
+    left: 5px;
+    float: left;
+}
+
+.float-right-top {
+    position:relative;
+    top: 5px;
+    right: 5px;
+    float: right;
+}
+
+
+.float-left-bottom {
+    position:relative;
+    bottom: 5px;
+    left: 5px;
+    float: left;
+}
+
+.float-right-bottom {
+    position:relative;
+    bottom: 5px;
+    right: 5px;
+    float: right;
+}
+
+
+
+button {
+  font-size: 2rem;
+  font-weight: bold;
+  padding: 0.5rem 1rem;
+  transition: all var(--global-transition-time) ease-in-out;
+  border-radius: 2rem;
+  color: var(--color-fg);
+  background-color: var(--color-bg);
+  border: 0.25rem solid var(--color-fg);
+}   
+
+
+.footer {
+	color: gray ;
+	font-size: x-small ;
+	text-transform: lowercase ;
+	text-align:center;
+}
+
+
+.com-rolagem{
+        /*border: 2px solid #000;*/
+        padding: 1px;
+        overflow-y: auto;
+        height: 90%;
+ }
+
+
+
+ .tool-button{
+	background-color: #ffffff;
+	border: 0px solid #ffffff;
+    border-radius: 5px;
+    font-size: 16px;
+    padding: 0px;
+    width: 16px;
+    height: 16px;
+    cursor: pointer;	 
+ }
+ 
+ .menu-button {
+    background-color: #ffffff;
+    color: #000080;
+    border: 0px solid #ffffff;
+    border-radius: 5px;
+    text-align: center;
+    font-size: 24px;
+    padding: 0px;
+    cursor: pointer;
+}
+
+ .floating-menu {
+    font-family: sans-serif;
+    background: #ffffff;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    color: black;
+    padding: 5px;;
+    /*width: 5px;*/
+    z-index: 100;
+    position: fixed;
+    top: 5px;
+    right: 5px;
+    height: auto;
+  }
+  
+  .floating-menu h1 {
+    font-size: 13px;
+    display: block;
+    margin: 0 0.5em;
+    color: blue;
+  }
+
+  .floating-menu a {
+    font-size: 13px;
+    display: block;
+    margin: 0 0.5em;
+    color: blue;
+  }      
+   
+]]
+
+
+html_dark_css = [[
+html {
+	background-color: #000000;
+	//scroll-behavior:smooth;
+	
+}
+
+
+body {
+	background-color: #1500;
+	color: #F2F2F2 ;
+	font-family: Helvetica, Arial, sans-serif ;
+	font-size: 16px;
+	text-align: justify ;
+	line-height: 1.25 ;
+	margin: 16px auto ;
+	padding: 32px ;
+	border: 1px solid #424242;
+	border-radius: 10px ;
+	max-width: 70em ;
+	width: 90% ;
+}
+
+h1, h2, h3, h4, .titulo {
+	color: #F2F2F2;
+	background-color: #000000;
+	font-family: Verdana, Geneva, sans-serif ;
+	font-weight: normal ;
+	font-style: normal ;
+	text-align: left ;
+	border-radius: 10px;
+}
+
+h1 {
+	font-size: 28pt ;
+}
+
+h1, img {
+	vertical-align: text-bottom ;
+}
+
+h2:before {
+	content: "\2756" ;
+	padding-right: 0.5em ;
+}
+
+
+
+
+a, i, p, ul {
+     color: #CED8F6;
+}
+
+
+.params-doc, .returns-doc {
+	margin-top: 10px;
+	margin-left: 40px;
+	margin-right: 10px;
+	margin-bottom: 20px;
+}
+
+.params-doc:before, .returns-doc:before {
+	content: "\2756" ;
+	padding-right: 0.5em ;
+}
+
+
+
+.tool-button{
+	background-color: #000000;
+	border: 0px solid #000000;
+    border-radius: 5px;
+    font-size: 16px;
+    padding: 0px;
+    width: 16px;
+    height: 16px;
+    cursor: pointer;	 
+ }
+
+
+
+.float-right-top {
+    position:relative;
+    top: 5px;
+    right: 5px;
+    float: right;
+}
+
+
+.float-left-bottom {
+    position:relative;
+    bottom: 5px;
+    left: 5px;
+    float: left;
+}
+
+.float-right-bottom {
+    position:relative;
+    bottom: 5px;
+    right: 5px;
+    float: right;
+}
+
+
+
+.menu-button {
+    background-color: #585858;
+    color: #F2F2F2;
+    border: 0px solid #F2F2F2;
+    border-radius: 5px;
+    text-align: left;
+    font-size: 24px;
+    padding: 0px;
+    cursor: pointer;
+}
+
+.caixa {
+   padding: 0px;
+   margin-bottom: 60px;
+   margin-right: 5px;
+   margin-top: 30px;
+   color:#CED8F6;
+}
+
+.bloco {
+   padding: 0px;
+   margin-bottom: 60px;
+   margin-right: 5px;
+   margin-top: 30px;
+   color: black;
+}
+
+.com-borda {
+   border: 1px solid #d5d5d5;
+   padding:1px 1px 1px 1px;
+   border-radius: 5px;
+}
+
+.com-corfundo{
+	background-color: #abb2b9;
+}
+
+.com-corletra-black{
+	color: black;
+}
+.com-corletra-white{
+	color: white;
+}
+
+.caixa-doc{
+	border: 1px solid #d5d5d5;
+	margin-top: 40px;
+	margin-bottom: 20px;
+	padding: 10px;
+	border-radius: 5px;
+}
+
+.title-func, .subtitle-func {
+    margin: 10px;
+    
+    color: silver;
+}
+
+
+
+
+pre{
+  background-color:  #abb2b9 ;
+  color: black;
+  margin: 2px; 
+  padding: 4px;
+}
+
+
+	
+.footer {
+	color: #F2F2F2;
+	font-size: x-small ;
+	text-transform: lowercase ;
+	text-align:center;
+}
+
+
+  .box-scroll{
+        /*border: 2px solid #000;*/
+        padding: 1px;
+        overflow-y: auto;
+        height: 90%;
+    }
+
+ .floating-menu {
+    font-family: sans-serif;
+    /*background: #585858;*/
+    background: #000000;
+    border: 1px solid #686868;
+    border-radius: 5px;
+    color: #F2F2F2;
+    padding: 5px;;
+    /*width: 5px;*/
+    z-index: 100;
+    position: fixed;
+    top: 5px;
+    left: 5px;
+    height: auto;
+  }
+  
+  .floating-menu h1 {
+    font-size: 13px;
+    display: block;
+    margin: 0 0.5em;
+    color: #F2F2F2;
+  }
+
+  .floating-menu a {
+    font-size: 13px;
+    display: block;
+    margin: 0 0.5em;
+    color: #F2F2F2;
+  }
+               
+]]
+
+//################################################################
+
+
+
+prisma_logo=[[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]]
+

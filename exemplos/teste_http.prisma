@@ -1,0 +1,44 @@
+
+local http = inclua'httpmini';
+
+// ------------------------
+// Rotas
+// ------------------------
+http.get("/", funcao(req, res)
+    res:envie("<h1>Bem-vindo ao Prisma HTTP Server</h1><p>Use /home ou /login</p>");
+fim);
+
+http.get("/home", funcao(req, res)
+    res:envie("<div class='box'><h1>Home</h1><p>Você está na Home!</p></div>");
+fim);
+
+http.get("/login", funcao(req, res)
+    res:envie("<h1>Login</h1><p>Formulário de login aqui...</p>");
+fim);
+
+http.get("/logo", funcao(req, res)
+    res:envie("<h1>Logo</h1><p>Imagem logo aqui...</p><img src=\"/static/logo.png\">");
+fim);
+
+http.get("/sair", funcao(req, res)
+    res:envie("<h1>Saindo...</h1>");
+    es.escreva("Servidor encerrado pelo cliente.");
+    sis.saia(0);
+fim);
+
+// ------------------------
+// Loop principal
+// ------------------------
+funcao principal()
+    local ip, porta = "127.0.0.1", "12345";
+    
+    local sock, err = http.servidor_inicie(ip, porta);
+    se nao sock entao erro(err); fim
+    
+    http.servidor_execute(sock);
+    http.servidor_finalize(sock);
+fim
+
+
+
+

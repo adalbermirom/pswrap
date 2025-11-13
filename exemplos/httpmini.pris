@@ -1,0 +1,328 @@
+local swrap = inclua'pswrap';
+local dir = inclua'dir';
+local string = string;
+local escreva = imprima;
+
+inclua'estrito'.modo_global();
+
+imprima(swrap.VERSAO);
+// ------------------------
+// Mini framework HTTP
+// ------------------------
+local http = { rotas = { GET = {}, POST = {} } }
+
+funcao http.get(path, handler)
+    http.rotas.GET[path] = handler;
+fim
+
+funcao http.post(path, handler)
+    http.rotas.POST[path] = handler;
+fim
+
+funcao http.dispatch(cliente, dados)
+
+    local headers = {};
+    local deve_fechar = falso;
+    local tab_header = dados:analise('\r\n', 1) ou {dados};
+    local tam_tab = #tab_header;
+    para i = 1, tam_tab inicio
+        local linha = tab_header[i];
+        local chave, valor = linha:separe('^(.-)%s*:%s*(.-)$');
+        se chave entao
+            headers[chave:apare():minuscula()] = valor:apare();
+        fim
+    fim
+    
+    se headers["connection"] == 'close' entao
+        deve_fechar = verdadeiro;
+    fim
+    
+
+    local metodo, path, versao = dados:separe('^([A-Z]+)%s+(.-)%s+(HTTP.-)%s*\n');
+    local handler = http.rotas[metodo] e http.rotas[metodo][path];
+    //imprima(dados);
+    //imprima(metodo);
+    //imprima(path);
+    //imprima(versao);
+    //imprima(http.public .. path);
+    //imprima(path:procure('^/static/') e dir.arquivo_existe(http.public..path));
+     // ex.:   /static/img.png
+    se path:procure('^/static/') e dir.arquivo_existe(http.public..path) entao //processar o mime correto:
+        //imprima('dentro do static');
+        local path_file, name_file, extension_file = sis.nome_arquivo(http.public..path);
+        local a, err = es.abra(http.public..path,'leitura');
+        local mime_type = http.mimes[extension_file];
+        se nao mime_type entao
+            err = err ou '';
+            err = err .. '\nMime não suportado: ' .. extension_file;
+        fim
+        se nao a ou nao mime_type entao
+           // res:envie(string.formate("<h1>%s</h1>", err), "500 Internal Server Error");
+            local resposta = http.def_html('Erro', string.formate("<h1>%s</h1>", err), '404 Not Found');
+            swrap.envie(cliente, resposta);
+        fim
+        local tam_file = sis.tamanho(http.public..path);
+        tam_file = tam_file ou 0;
+        local tam_bloco = 1014;
+        
+        local cabecalho = 'HTTP/1.1 200 OK\n'..
+                          'Content-Type: '..mime_type..'; charset=UTF-8\n'..
+                          'Content-Length: '..tam_file .. '\n\n';
+                          
+        swrap.envie(cliente, cabecalho);
+        
+        local bloco = a:leia(tam_bloco);
+        enquanto bloco inicio
+            swrap.envie(cliente, bloco);
+            bloco = a:leia(tam_bloco);
+        fim
+        a:feche();
+    fim
+    
+    local req = { metodo = metodo, path = path, versao = versao, raw = dados }
+    local res = {
+        envie = funcao(este, body, code)
+            local code = code ou "200 OK";
+            local resposta = http.def_html("Prisma Server", body, code);
+            swrap.envie(cliente, resposta);
+        fim
+    }
+
+    se handler entao
+        handler(req, res); 
+    senao
+        res:envie("<h1>404 Not Found</h1>", "404 Not Found");
+    fim
+    retorne deve_fechar;
+fim
+
+// ------------------------
+// Utilitários HTML
+// ------------------------
+local html_tipo = [[
+HTTP/1.1 {{code}}
+Content-Type: text/html; charset=UTF-8
+Content-Length: {{tamanho_em_bytes}}
+
+
+]]
+
+local html_inicio = [[
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>{{titulo}}</title>
+    <style>
+        body { font-family: Arial, sans-serif; background-color: #f0f0f0; color: #333; padding: 20px; }
+        h1 { color: #2c3e50; }
+        .box { background:#fff; padding:15px; border-radius:5px; border:1px solid #ccc; }
+    </style>
+</head>
+<body>
+]]
+
+local html_fim = [[
+</body>
+</html>
+]]
+
+funcao http.servidor_inicie(ip, porta)
+    swrap.inicialize();
+
+    local sock, msg = swrap.socket(swrap.TCP, swrap.SERVIDOR, swrap.PADRAO, ip, porta);
+    se sock == nulo entao
+        escreva("Erro ao criar socket: ", msg);
+        retorne;
+    fim
+
+    local sucesso, msg = swrap.escute(sock, 5);
+    se sucesso == nulo entao
+        escreva("Erro ao escutar: ", swrap.obt_ultimo_erro());
+        retorne;
+    fim
+
+    escreva("Servidor HTTP iniciado em http://" .. ip .. ":" .. porta);
+    retorne sock
+fim
+
+funcao http.def_html(titulo, txt, code)
+    local code = code ou "200 OK";
+    local body = html_inicio:troque("{{titulo}}", titulo) .. txt .. html_fim;
+    local tamanho = #body;
+    local src = html_tipo
+        :troque("{{code}}", code)
+        :troque("{{tamanho_em_bytes}}", convstring(tamanho))
+        .. body;
+    retorne src;
+fim
+
+
+funcao http.servidor_execute_single(sock)
+    enquanto verdadeiro inicio
+        local cliente, addr = swrap.aceitar(sock);
+        se cliente <> nulo entao
+            local dados, n = swrap.receba(cliente, 2048);
+            se dados <> nulo entao
+                http.dispatch(cliente, dados);
+            fim
+            swrap.feche(cliente);
+        fim
+    fim
+fim
+
+// Server modo assíncrono:
+funcao http.servidor_execute(sock)
+    //tabela para rastrear todos os sockets (servidor + clientes);
+    //A chave é o socket handler, o valor é 'verdadeiro';
+    local todos_sockets = {}
+    //adiciona o socket principal do servidor à lista:
+    todos_sockets[sock] = verdadeiro;
+    imprima('Servidor pronto para aceitar conexões (modo assíncrono)...');
+    //loop de Eventos:
+    enquanto verdadeiro inicio
+        //1. prepara a lista de sockets para o 'multi_seletor':
+        //A função em C do swrap espera uma lista não uma tabela key=value;
+        local lista_c = {};
+        para socket_handle em pares(todos_sockets) inicio
+            lista_c[#lista_c+1] = socket_handle;
+        fim
+        
+        //Se não houver sockets (raro), espera um pouco:
+        se #lista_c == 0 entao
+            sis.durma(0.1) //evita loop de 100% CPU;
+            vapara continue; //no fim do loop.
+        fim
+        
+        //2. Bloqueia AQUI (o único ponto de bloqueio)
+        //Espera por atividade em *qualquer* socket por até 60s
+        local socket_pronto, err, codigo = pswrap.multi_seletor(lista_c, 60.0);
+        
+        //3. Processa o evento:
+        se socket_pronto entao
+            //Caso A: A atividade foi no socket principal?
+            //se sim, é uma nova conexão.
+            se socket_pronto == sock entao
+                local cliente_socket, ip_cliente = swrap.aceitar(sock);
+                se cliente_socket entao
+                    imprima("[+] Nova conexão:", cliente_socket, "de", ip_cliente);
+                    //adiciona o novo cliente à nossa lista de monitoramento
+                    todos_sockets[cliente_socket] = verdadeiro;
+                senao
+                    //Erro ao aceitar (raro)
+                    imprima("[!] Erro ao aceitar:", ip_cliente);
+                fim
+            
+            senao
+                //caso B: A atividade foi em um socket de cliente?
+                //se sim, o cliente enviou dados.
+                local dados, n = pswrap.receba(socket_pronto, 2048);
+                //cliente eviou dados?
+                se dados e n > 0 entao
+                    imprima("[>] Recebido de:", socket_pronto);
+                    //chama sua lógica de framework existente:
+                    local deve_fechar = http.dispatch(socket_pronto, dados);
+                    
+                    se deve_fechar entao
+                        imprima("[<] Conexão 'close' pedida, fechando", socket_pronto);
+                        pswrap.feche(socket_pronto);
+                        todos_sockets[socket_pronto] = nulo;
+                    
+                    fim
+                    
+               
+                    //cliente desconectou?
+                senao
+                    imprima("[-] Cliente desconectou:", socket_pronto);
+                    pswrap.feche(socket_pronto);
+                    //Remove o cliente da lista de monitoramento:
+                    todos_sockets[socket_pronto] = nulo;
+                fim
+                //IMPORTANTE: Sua lógica original fecha o socket
+                //após cada 'dispatch'. Vamos manter isso.
+                //Se você quiser 'Keep-Alive', teria que mudar o dispatch.
+                /*se todos_sockets[socket_pronto] entao
+                    imprima("[<] Resposta enviada, fechando:", socket_pronto);
+                    pswrap.feche(socket_pronto);
+                    todos_sockets[socket_pronto] = nulo;
+                fim
+                */
+            fim
+        senaose codigo == 0 entao
+                //Sem atividade, apenas um timeout. O loop continua...
+                //(Aqui você poderia verificar clientes inativos, etc)
+        senao
+            imprima("[!] Erro fatal no multi_seletor:", err);
+            quebre; //sai do loop principal
+        fim
+        ::continue::
+    fim
+fim
+
+
+
+funcao http.servidor_finalize(sock)
+    swrap.feche(sock);
+    swrap.finalize();
+fim
+
+http.mimes = {
+    html  = 'text/html; charset=UTF-8',
+    htm   = 'text/html; charset=UTF-8',
+    css   = 'text/css',
+    js    = 'application/javascript',
+    json  = 'application/json',
+    xml   = 'application/xml',
+    txt   = 'text/plain; charset=UTF-8',
+    csv   = 'text/csv',
+    pdf   = 'application/pdf',
+    zip   = 'application/zip',
+    gz    = 'application/gzip',
+    tar   = 'application/x-tar',
+    rar   = 'application/vnd.rar',
+    ['7z'] = 'application/x-7z-compressed',
+
+    // imagens
+    png   = 'image/png',
+    jpg   = 'image/jpeg',
+    jpeg  = 'image/jpeg',
+    gif   = 'image/gif',
+    bmp   = 'image/bmp',
+    webp  = 'image/webp',
+    ico   = 'image/x-icon',
+    svg   = 'image/svg+xml',
+
+    // áudio
+    mp3   = 'audio/mpeg',
+    wav   = 'audio/wav',
+    ogg   = 'audio/ogg',
+    m4a   = 'audio/mp4',
+
+    // vídeo
+    mp4   = 'video/mp4',
+    avi   = 'video/x-msvideo',
+    mov   = 'video/quicktime',
+    webm  = 'video/webm',
+    ogv   = 'video/ogg',
+
+    // fontes
+    ttf   = 'font/ttf',
+    otf   = 'font/otf',
+    woff  = 'font/woff',
+    woff2 = 'font/woff2',
+
+   //  outros
+    wasm  = 'application/wasm',
+    exe   = 'application/octet-stream',
+    bin   = 'application/octet-stream',
+}
+
+http.public = './www';
+
+// ex.:  http.set_mim('ogv', 'Content-Type: application/ogg');
+funcao http.set_mime(ext, mime_txt)
+    http.mime[ext] = mime_txt;
+fim
+
+
+retorne http;

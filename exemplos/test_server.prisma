@@ -1,0 +1,176 @@
+local swrap = inclua'pswrap';
+local escreva = imprima;
+
+local ip, porta = "127.0.0.1", "12345";
+local mensagem;
+
+funcao principal()
+    // Inicializa a biblioteca de sockets
+    swrap.inicialize()
+
+    // Cria socket TCP e vincula
+    local sock, msg = swrap.socket(swrap.TCP, swrap.BIND, swrap.PADRAO, ip, porta)
+    
+    //escreva(swrap.valide_socket(sock));
+    se sock == nulo entao
+        escreva("Erro ao criar socket: ", msg)
+        retorne
+    fim
+    //leia();
+    // Coloca para escutar
+    local sucesso, msg = swrap.escute(sock, 5)
+    se sucesso == nulo entao
+        escreva("Erro ao escutar: ", swrap.obt_ultimo_erro())
+        retorne
+    fim
+
+    escreva("Servidor TCP iniciado na porta " .. porta.."...")
+
+    enquanto verdadeiro inicio
+        // Aceita nova conexão
+        cliente, addr = swrap.aceitar(sock)
+        se cliente <> nulo entao
+            local host, porta = swrap.endereco_info(cliente)
+            escreva("Nova conexão de ", host, ":", porta)
+
+            // Recebe dados do cliente
+            dados, n = swrap.receba(cliente, 1024)
+            se dados <> nulo entao
+            //GET / HTTP/1.1
+                escreva("Recebido:\n", dados)
+                local metodo, path, versao = dados:separe('^([A-Z]+)%s+(.-)%s+(HTTP.-)%s*\n');
+               // imprima(metodo);
+                //imprima(path);
+                //imprima(versao);
+                se path == '/' entao //index
+                    mensagem = def_html('Index', '<h1>Estamos no diretório raiz / .</h1>');
+                senaose path == '/home' entao
+                    mensagem = def_html('Home', '<h1>Estamos em Home!</h1>');
+                senaose path == '/login' entao
+                    mensagem = def_html('Login', '<h1>Estamos em Login!</h1>');
+                senaose path == '/sair' entao
+                    swrap.feche(cliente);
+                    mensagem = def_html('SAINDO', '<h1> Saindo ...</h1>');
+                    swrap.envie(cliente, mensagem) // eco
+                    quebre; //quebra o laço!
+                senaose path == '/admin' entao
+                    mensagem = def_html_redirect('/login');
+                senao 
+                    mensagem = def_html('ERRO 404', '<h1> Erro 404! Path not found: '.. path .. '</h1>', '404 Not Found');
+                fim
+                swrap.envie(cliente, mensagem) // eco
+            fim
+
+            swrap.feche(cliente)
+        fim
+    fim
+    
+    swrap.feche(sock);                  
+    swrap.finalize();
+fim
+
+
+local html_tipo = [[
+HTTP/1.1  {{code}}
+Content-Type: text/html; charset=UTF-8
+Content-Length: <tamanho_em_bytes>
+
+
+]]
+
+
+
+local html_inicio = [[
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>{{titulo}}</title>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            background-color: #f0f0f0; 
+            color: #333; 
+            padding: 20px; 
+        }
+        h1 { color: #2c3e50; }
+        p { font-size: 1.2em; }
+        .cliente { 
+            background-color: #fff; 
+            border: 1px solid #ccc; 
+            padding: 10px; 
+            margin: 10px 0; 
+            border-radius: 5px; 
+        }
+    </style>
+</head>
+<body>
+]]
+
+local html_fim = [[
+</body>
+</html>
+]]
+
+funcao def_html(titulo, txt, code)
+    local code = code ou '200 OK';
+    local body = html_inicio:troque('{{titulo}}', titulo) .. txt .. html_fim;
+    local tamanho = #body; // quantidade de bytes do corpo
+
+    local src = 'HTTP/1.1 ' .. code .. '\r\n'
+        .. 'Content-Type: text/html; charset=UTF-8\r\n'
+        .. 'Content-Length: ' .. tamanho .. '\r\n'
+        .. '\r\n'  // separador cabeçalho / corpo
+        .. body;
+
+    retorne src;
+fim
+
+funcao def_html_redirect(txt)
+    local ret = [[
+HTTP/1.1 302 Found
+Location: ]] .. txt;
+    retorne ret;
+fim
+
+
+mensagem = [[
+HTTP/1.1 200 OK
+Content-Type: text/html; charset=UTF-8
+Content-Length: <tamanho_em_bytes>
+
+
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>Servidor Prisma</title>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            background-color: #f0f0f0; 
+            color: #333; 
+            padding: 20px; 
+        }
+        h1 { color: #2c3e50; }
+        p { font-size: 1.2em; }
+        .cliente { 
+            background-color: #fff; 
+            border: 1px solid #ccc; 
+            padding: 10px; 
+            margin: 10px 0; 
+            border-radius: 5px; 
+        }
+    </style>
+</head>
+<body>
+    <h1>Servidor Prisma TCP</h1>
+    <p>Mensagem recebida do cliente:</p>
+    <div class="cliente">
+        <strong>Cliente:</strong> 127.0.0.1<br>
+        <strong>Mensagem:</strong> Olá, servidor!
+    </div>
+</body>
+</html>
+
+]]
