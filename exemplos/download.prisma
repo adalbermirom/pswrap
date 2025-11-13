@@ -1,0 +1,96 @@
+
+local swrap = inclua'pswrap'
+
+// Garante que o pswrap esteja inicializado (necessário no Windows)
+pswrap.inicialize()
+
+local download;
+local host = 'google.com'
+local path = '/' //na raiz
+funcao principal(argv)
+    local corpo, cabecalho, err = download(host, path)
+    //tratativa de erro:
+    se nao corpo entao erro(err); fim
+    
+    imprima('----------------------------\nCabeçalho:\n--------------------------');
+    imprima(cabecalho);
+    imprima('----------------------------\nCorpo:\n--------------------------');
+    imprima(corpo);
+    
+    pswrap.finalize()
+    retorne 0;
+fim
+
+
+
+
+//-
+// Faz o download do corpo de um arquivo via HTTP (porta 80).
+//
+// @param host (string) O nome do dominio (ex: "google.com")
+// @param path (string) O caminho do arquivo (ex: "/index.html" ou "/")
+// @retorno corpo (string|nulo) O conteudo do arquivo, ou nulo em erro.
+// @retorno err (string|nulo) A mensagem de erro.
+//-
+funcao download(host, path)
+    local path = path ou '/'
+    local porta = "80" // pswrap so suporta HTTP, nao HTTPS
+    
+    // 1. Conectar ao servidor
+    // (pswrap.socket faz o DNS lookup e a conexao)
+    local sock, err = pswrap.socket(pswrap.TCP, pswrap.CLIENTE, pswrap.PADRAO, host, porta)
+    
+    se nao sock entao
+        retorne nulo, "Falha ao conectar: " .. (err ou "erro desconhecido")
+    fim
+    
+    // 2. Construir a requisicao HTTP 1.1
+    // (pswrap e "burra", ela so envia texto. Nos temos que
+    // escrever o "protocolo" HTTP manualmente).
+    local requisicao = ""
+    requisicao = requisicao .. "GET " .. path .. " HTTP/1.1\r\n"
+    requisicao = requisicao .. "Host: " .. host .. "\r\n"
+    
+    // !! IMPORTANTE !!
+    // Dizemos ao servidor para FECHAR a conexao apos a resposta.
+    // Isso torna nosso loop de recebimento muito mais facil.
+    requisicao = requisicao .. "Connection: close\r\n"
+    
+    // Termina os cabecalhos com uma linha em branco
+    requisicao = requisicao .. "\r\n"
+    
+    // 3. Enviar a requisicao
+    pswrap.envie(sock, requisicao)
+    
+    // 4. Loop de recebimento (para arquivos grandes)
+    local resposta_total = ""
+    enquanto verdadeiro inicio
+        // Tenta ler ate 4KB (4096 bytes) de dados
+        local dados, bytes = pswrap.receba(sock, 4096)
+        
+        // 'bytes > 0' significa que recebemos dados
+        se dados e bytes > 0 entao
+            resposta_total = resposta_total .. dados
+        senao
+            // 'bytes == 0' ou 'dados == nulo' significa que o
+            // servidor fechou a conexao (como pedimos em 'Connection: close')
+            quebre
+        fim
+    fim
+    
+    // 5. Limpeza
+    pswrap.feche(sock)
+    
+    // 6. Processar a resposta
+    // A 'resposta_total' contem os cabecalhos E o corpo.
+    // Precisamos separar o corpo (o arquivo real).
+    
+    // Procura pela primeira linha em branco (\r\n\r\n)
+    local cabecalho, corpo = resposta_total:separe("^(.-)\r\n\r\n(.*)", 1, "s")
+    
+    se corpo e cabecalho entao
+        retorne corpo, cabecalho
+    senao
+        retorne nulo, nulo, "Resposta HTTP invalida (sem corpo)"
+    fim
+fim
