@@ -561,7 +561,6 @@ fim
 funcao mk_img(t,i, tout)
     T(t); N(i); 
     local img_larg, img_desc, img_link, primeiro_espaco, segundo_espaco;
-     //<img src="img_girl.jpg" alt="Girl in a jacket" width="150" height=""> 
     local fmt = '<img class="com-borda" id="%s" src="%s" alt="%s" width="%s">\n' ..
 [[
 <script>
@@ -807,6 +806,7 @@ local funcao mk_parag(t,i,tout)
     tout:insira('<p>\n'.. html_escape(txt) .. '\n</p>');
     retorne i;
 fim
+
 
 local funcao mk_list(t,i,tout)
     local ini, fini, tag, txt =  procure_tag(t[i],'\\lista','@lista','\\list', '@list', '\\start_list', '@start_list', '\\inicio_lista', '@inicio_lista');

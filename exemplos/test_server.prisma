@@ -9,7 +9,7 @@ funcao principal()
     swrap.inicialize()
 
     // Cria socket TCP e vincula
-    local sock, msg = swrap.socket(swrap.TCP, swrap.BIND, swrap.PADRAO, ip, porta)
+    local sock, msg = swrap.socket(swrap.TCP, swrap.SERVIDOR, swrap.PADRAO, ip, porta)
     
     //escreva(swrap.valide_socket(sock));
     se sock == nulo entao
