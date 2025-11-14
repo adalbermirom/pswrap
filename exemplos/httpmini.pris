@@ -1,23 +1,71 @@
+/*
+ * Simples exemplo de http server com rotas: get/post
+ * Ele é bem simples não aceita parâmetros na rota ainda, mas já está bem
+ * funcional.
+ * 
+ * Veja o exemplo 'teste_http.prisma'
+ * 
+*/
+
+//lib de redes tcp, udp
 local swrap = inclua'pswrap';
+
+//necessário para verificar a existência de arquivos/pastas e criar pastas:
 local dir = inclua'dir';
+//versões locais das bibliotecas padrão string e função imprima para máxima eficiência.
 local string = string;
 local escreva = imprima;
 
+//biblioteca estrito.pris para rastrear variáveis globais não declaradas
+//e não permite mudar o tipo. Usamos somente em modo debug, em release não precisa.
 inclua'estrito'.modo_global();
 
+//imprime a versão do binding Prisma pswrap
 imprima(swrap.VERSAO);
 // ------------------------
 // Mini framework HTTP
 // ------------------------
+/**
+  \var http
+  \resumo Namespace da lib http, onde serão guardadas as rotas e métodos.
+*/
 local http = { rotas = { GET = {}, POST = {} } }
 
+/**
+    \fn http.get
+    \resumo Cria uma rota do tipo get
+    \param path {string} - o nome da rota.
+    \param handler {funcao} - A função que será executada nesta rota.
+    \retorno (nenhum)
+    
+    \h3 Exemplo:
+    \codigo http_get.prisma
+    http.get('home', funcao(req, res)
+        //logica do home aqui.
+    fim);
+    \codigo--
+*/
 funcao http.get(path, handler)
     http.rotas.GET[path] = handler;
 fim
-
+/**
+    \fn http.post
+    \resumo Cria uma rota do tipo post
+    \param path {string} - o nome da rota.
+    \param handler {funcao} - A função que será executada nesta rota, funcao(req, res)...fim
+    \retorno (nenhum)
+    
+    \h3 Exemplo:
+    \codigo http_post.prisma
+    http.post('login', funcao(req, res)
+        //logica do login aqui.
+    fim);
+    \codigo--
+*/
 funcao http.post(path, handler)
     http.rotas.POST[path] = handler;
 fim
+
 
 funcao http.dispatch(cliente, dados)
 
@@ -127,19 +175,29 @@ local html_fim = [[
 </html>
 ]]
 
+
+/**
+    \fn http.servidor_inicie
+    \resumo Inicia o servidor.
+    \param ip {string} - O ip da rota, exemplo: "10.0.0.1" ou "127.0.0.1", etc
+    \param porta {string} - A porta usada pelo servidor, exemplo: "12345" ou "8080", etc
+    \retorno socket {numero|nulo} - O id (numero) do socket aberto ou nulo em erro.
+    \retorno err {string|nulo} - String do erro ou nulo;
+*/
+
 funcao http.servidor_inicie(ip, porta)
     swrap.inicialize();
 
     local sock, msg = swrap.socket(swrap.TCP, swrap.SERVIDOR, swrap.PADRAO, ip, porta);
     se sock == nulo entao
-        escreva("Erro ao criar socket: ", msg);
-        retorne;
+        //escreva("Erro ao criar socket: ", msg);
+        retorne falso, msg;
     fim
 
     local sucesso, msg = swrap.escute(sock, 5);
     se sucesso == nulo entao
-        escreva("Erro ao escutar: ", swrap.obt_ultimo_erro());
-        retorne;
+        //escreva("Erro ao escutar: ", swrap.obt_ultimo_erro());
+        retorne falso, swrap.obt_ultimo_erro();
     fim
 
     escreva("Servidor HTTP iniciado em http://" .. ip .. ":" .. porta);
