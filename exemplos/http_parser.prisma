@@ -1,0 +1,104 @@
+//este é um exemplo de como pegar um cabeçalho http e transformá-lo em uma tabela
+//a função http_obt_cab(); faz exatamente isso.
+
+
+
+local s, http_obt_cab;
+
+funcao principal()
+    // Passe a string 's' global para a funcao
+    local t, err = http_obt_cab(s);
+    
+    se nao t entao
+        erro("Falha ao analisar: " .. err)
+    fim
+    
+    para k, v em pares(t) inicio
+        // Se o valor for uma tabela (multiplos cookies), 
+        // precisamos imprimi-la de forma especial
+        se tipo(v) == 'tabela' entao
+            imprimaf('[%s]: (tabela)\n', k)
+            para i, sub_val em ipares(v) inicio
+                imprimaf('  [%d] -> %q\n', i, sub_val)
+            fim
+        senao
+            imprimaf('[%s]: %q\n', k, v);
+        fim
+    fim
+    retorne 0;
+fim
+
+/**
+ \fn http_obt_cab
+ \resumo Analisa um bloco de cabecalho HTTP (string) e o transforma em uma tabela (map) chave/valor.
+ \param s (string) O bloco de cabecalho (sem o corpo).
+ \retorno (tabela|nulo) A tabela de cabecalhos ou nulo.
+ \retorno (string|nulo) Mensagem de erro.
+*/
+funcao http_obt_cab(s)
+    S(s);
+    // HTTP/1.1 301 Moved Permanently
+    local http_versao, http_codigo, http_desc = s:separe('^(HTTP/.-)%s+(%d+)%s+(.-)\r\n');
+    se nao http_versao entao
+        retorne nulo, 'Cabeçalho não é HTTP';
+    fim
+    
+    // [CORRIGIDO] O split DEVE ser na sequencia "\r\n"
+    local t = string.analise(s, '\r\n', 1); 
+    se não t entao retorne nulo, 'Cabeçalho inválido'; fim
+    
+    local ret = {}; //tabela map a ser retornada
+    local tam = #t;
+    
+    // Opcional: Salva a primeira linha para referencia
+    ret['status_linha'] = t[1]
+    ret.http_versao = http_versao;
+    ret.http_codigo = http_codigo;
+    ret.http_descricao = http_desc;
+    
+    para i = 2, tam inicio
+        local v = t[i];
+        
+        // Pula linhas em branco (necessario se o \r\n\r\n do corpo veio junto)
+        //se v == "" entao vapara continue fim
+        
+        local k, val = v:separe('^(.-):%s*(.*)');
+        se nao k entao //chave não encontrada
+            imprima('Aviso: Linha de cabeçalho mal formatada: ' .. v)
+            vapara continue; 
+        fim
+        
+        // Sua normalizacao (excelente!)
+        k = k:apare():minuscula():troque('%-', '_');
+        
+        // [CORRIGIDO] Logica para chaves duplicadas
+        se ret[k] entao
+            // Chave ja existe
+            se tipo(ret[k]) == 'tabela' entao
+                // Ja e uma tabela, so adiciona
+                ret[k][#ret[k]+1] = val;
+            senao
+                // Era um valor unico, transforma em tabela
+                local val_antigo = ret[k]
+                ret[k] = { val_antigo, val }
+            fim
+        senao
+            // Chave nova, apenas define
+            ret[k] = val;
+        fim
+        ::continue::
+    fim
+    retorne ret;
+fim
+
+// Para testes, o ideal e usar \r\n explicitamente
+s = "HTTP/1.1 301 Moved Permanently\r\n" ..
+    "Location: http://www.google.com/\r\n" ..
+    "Content-Type: text/html; charset=UTF-8\r\n" ..
+    "Set-Cookie: cookie_A=123\r\n" .. // Teste 1
+    "Date: Thu, 13 Nov 2025 13:36:25 GMT\r\n" ..
+    "Expires: Sat, 13 Dec 2025 13:36:25 GMT\r\n" ..
+    "Set-Cookie: cookie_B=xyz\r\n" .. // Teste 2
+    "Server: gws\r\n" ..
+    "Content-Length: 219\r\n" ..
+    "Connection: close\r\n"
