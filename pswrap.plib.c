@@ -367,10 +367,24 @@ fim
             FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, \
             NULL, err, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), \
             buf, sizeof(buf), NULL); \
-        if (len == 0) strcpy(buf, "Unknown socket error"); \
+        if (len == 0) strcpy(buf, "Erro desconhecido de socket."); \
         lua_pushnil(L); \
         lua_pushstring(L, buf); \
         return 2; \
+    }
+#define TEST_RET_SOCK3(sock) \
+    if ((sock) == -1) { \
+        int err = WSAGetLastError(); \
+        char buf[512]; \
+        DWORD len = FormatMessageA( \
+            FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, \
+            NULL, err, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), \
+            buf, sizeof(buf), NULL); \
+        if (len == 0) strcpy(buf, "Erro desconhecido de socket."); \
+        lua_pushnil(L); \
+        lua_pushnil(L); \
+        lua_pushstring(L, buf); \
+        return 3; \
     }
 #else
 #define TEST_RET_SOCK(sock) \
@@ -380,6 +394,27 @@ fim
         lua_pushnil(L); \
         lua_pushstring(L, buf); \
         return 2; \
+    }
+    
+#define TEST_RET_SOCK3(sock) \
+    if ((sock) == -1) { \
+        char buf[512]; \
+        strerror_r(errno, buf, sizeof(buf)); \
+        lua_pushnil(L); \
+        lua_pushnil(L); \
+        lua_pushstring(L, buf); \
+        return 3; \
+    }
+    
+#define TEST_RET_SOCK4(sock) \
+    if ((sock) == -1) { \
+        char buf[512]; \
+        strerror_r(errno, buf, sizeof(buf)); \
+        lua_pushnil(L); \
+        lua_pushnil(L); \
+        lua_pushnil(L); \
+        lua_pushstring(L, buf); \
+        return 4; \
     }
 #endif
 
@@ -391,10 +426,11 @@ fim
     \param socket {numero} - O handle do socket do servidor (que esta escutando).
     \retorno cliente_socket {numero|nulo} - O handle do novo socket do cliente, ou nulo.
     \retorno ip_cliente {string|nulo} - O endereco IP do cliente conectado.
+    \retorno err {string|nulo} - A string de erro se houver.
     
 \codigo ex_aceitar.prisma
 // (servidor em modo bloqueante, para exemplo)
-local cliente, ip = pswrap.aceitar(sock_servidor)
+local cliente, ip, err = pswrap.aceitar(sock_servidor)
 se cliente entao
     imprima("Cliente conectado:", ip)
     pswrap.envie(cliente, "Ola!")
@@ -413,11 +449,11 @@ funcao swrapAccept(sock) #[export aceitar]
     // Validação do socket
     char err_msg[256];
     if (validate_socket(sock, err_msg, sizeof(err_msg)) != 0) {
-        retorne $.nulo, $.string(err_msg);
+        retorne $.nulo, $.nulo, $.string(err_msg);
     }
     
     int new_sock = swrapAccept(sock, &add);
-    TEST_RET_SOCK(new_sock);
+    TEST_RET_SOCK3(new_sock); //*_SOCK3: nulo, nulo, err = ();
     retorne $.int(new_sock), $.string(add.data);
 fim
 
