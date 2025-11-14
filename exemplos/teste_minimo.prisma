@@ -12,7 +12,8 @@ funcao principal()
     //imprima(swrap.valide_socket(sock));
     se nao sock entao
         imprima("Erro ao criar socket: ", err)
-        retorne
+        swrap.finalize();
+        retorne 1;
     fim
     //leia();
     // Coloca para escutar
@@ -20,7 +21,9 @@ funcao principal()
     se nao sucesso entao
         imprima("Erro ao escutar: ", swrap.obt_ultimo_erro())
         //poderia usar 'err' como mensagem de erro, mas para exemplificar usei swrap.obt_ultimo_erro().
-        retorne
+        swrap.feche(sock);                  
+        swrap.finalize();
+        retorne 1;
     fim
 
     imprima("Servidor TCP iniciado na porta " .. porta.."...")
