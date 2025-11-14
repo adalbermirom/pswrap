@@ -1,43 +1,49 @@
 local swrap = inclua'pswrap';
-local escreva = imprima;
 
 local ip, porta = "127.0.0.1", "12346";
-local mensagem;
 
 funcao principal()
     // Inicializa a biblioteca de sockets
     swrap.inicialize()
 
     // Cria socket TCP e vincula
-    local sock, msg = swrap.socket(swrap.TCP, swrap.SERVIDOR, swrap.PADRAO, ip, porta)
+    local sock, err = swrap.socket(swrap.TCP, swrap.SERVIDOR, swrap.PADRAO, ip, porta)
     
-    //escreva(swrap.valide_socket(sock));
-    se sock == nulo entao
-        escreva("Erro ao criar socket: ", msg)
+    //imprima(swrap.valide_socket(sock));
+    se nao sock entao
+        imprima("Erro ao criar socket: ", err)
         retorne
     fim
     //leia();
     // Coloca para escutar
-    local sucesso, msg = swrap.escute(sock, 5)
-    se sucesso == nulo entao
-        escreva("Erro ao escutar: ", swrap.obt_ultimo_erro())
+    local sucesso, err = swrap.escute(sock, 5)
+    se nao sucesso entao
+        imprima("Erro ao escutar: ", swrap.obt_ultimo_erro())
+        //poderia usar 'err' como mensagem de erro, mas para exemplificar usei swrap.obt_ultimo_erro().
         retorne
     fim
 
-    escreva("Servidor TCP iniciado na porta " .. porta.."...")
+    imprima("Servidor TCP iniciado na porta " .. porta.."...")
 
     enquanto verdadeiro inicio
         // Aceita nova conexão
-        local cliente, addr = swrap.aceitar(sock)
-        se cliente <> nulo entao
-            local host, porta = swrap.endereco_info(cliente)
-            escreva("Nova conexão de ", host, ":", porta)
+        local cliente, addr, err = swrap.aceitar(sock);
+        se nao cliente entao
+            imprima('Erro ao receber cliente:', err); 
+            //um erro de um cliente não pode parar o servidor!
+        fim
+        //caso cliente seja válido, processamos a conexao e enviamos a mensagem!
+        se cliente entao
+            local host, porta, err = swrap.endereco_info(cliente)
+            se host entao
+                imprima("Nova conexão de ", host, ":", porta);
+            fim
 
             // Recebe dados do cliente
-            dados, n = swrap.receba(cliente, 1024)
-            se dados <> nulo entao
+            local dados, n = swrap.receba(cliente, 1024)
+            se dados entao
             //GET / HTTP/1.1
-                escreva("Recebido:\n", dados)
+                imprima("Recebido:\n", dados)
                 local mensagem = 'Oi, servidor responde!';
                 swrap.envie(cliente, mensagem) // eco
             fim
